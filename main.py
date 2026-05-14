@@ -95,7 +95,7 @@ def get_kpis():
 @app.post("/scraper/lancer")
 def lancer_scraper():
     try:
-        subprocess.Popen(["python", "scrapers/scraper_google.py"])
-        return {"message": "Scraper lancé ✅"}
+        subprocess.Popen(["python", "scrapers/scraper_places.py"])
+        return {"message": "Scraper Google Maps lancé ✅"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
