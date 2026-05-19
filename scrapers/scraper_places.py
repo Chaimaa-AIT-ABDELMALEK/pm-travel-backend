@@ -1,20 +1,18 @@
-import requests
-import pymysql
-import re
-import time
-from dotenv import load_dotenv
-import os
-import dns.resolver
-import smtplib
-import socket
+import requests #appeler l'api google places et visiter les sites web des prospects pour extraire les emails
+import pymysql #connecter python a mysql
+import re #expressions regulieres de python pour extraire les emails et verifier leur format
+import time #pause entre chaque prospect
+from dotenv import load_dotenv #lie et charge le fichier .env
+import os #acceder aux valeurs du .env
+import dns.resolver #demander au dns si un email et son domaine existent
+import smtplib #se connecter aux serveurs mail smtp
+import socket #gere les connexions reaseau
 
-load_dotenv()
+load_dotenv() #transforme les variables dans .env en variables utilisables dans le code (os.getenv("DB_HOST")  → "localhost")
 
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') #ne change pas dans le code
 
-# ─────────────────────────────────────────
 # CONFIGURATION
-# ─────────────────────────────────────────
 
 VILLES_HOTELS = [
     'Marrakech', 'Casablanca', 'Agadir', 'Fes',
@@ -43,31 +41,63 @@ SECTEURS_AGENCES = [
     'tour operator'
 ]
 
-# ─────────────────────────────────────────
 # CONNEXION BASE DE DONNÉES
-# ─────────────────────────────────────────
 
 def connect_db():
-    return pymysql.connect(
+    return pymysql.connect( #retourne une nouvelle con
         host=os.getenv('DB_HOST'),
-        port=int(os.getenv('DB_PORT')),
+        port=int(os.getenv('DB_PORT')), #convertit le string en entier
         user=os.getenv('DB_USER'),
         password=os.getenv('DB_PASSWORD'),
         database=os.getenv('DB_NAME'),
-        charset='utf8mb4'
+        charset='utf8mb4' #supporte tous les caracteres speciaux
     )
 
-# ─────────────────────────────────────────
 # VALIDATION EMAIL
-# ─────────────────────────────────────────
+
+def verifier_dns(email):
+    domaine = email.split('@')[1] #split divise l'email autour de @ et retourne une liste puis on prend le deuxieme element comme domaine
+    try:
+        records = dns.resolver.resolve(domaine, 'MX') #les enregistrement mx pour savoir quel est le serveur
+        return True, str(records[0].exchange) #chercher les serveurs mail et choisir le premier element
+    except:
+        return False, None #si le serveur n'est pas trouve return false,none
+
+def verifier_smtp(email, mx_serveur):
+    try:
+        serveur = smtplib.SMTP(timeout=10) #se le serveur ne repond pas en 10s on abandonne
+        serveur.connect(mx_serveur) #se connecter au serveur mail du domaine
+        serveur.helo('gmail.com') #se presenter envoyant hello pour que gmail.com pour paraitre legitime
+        serveur.mail('test@gmail.com')# envoyer un message test
+        code, message = serveur.rcpt(email)#demander si la livraison de l'email a cette adresse est possible
+        serveur.quit() #fermer la connexion sntp
+        return code == 250 #250 est true les autres sont fausses
+    except:
+        return False
 
 def valider_email(email):
+    # Couche 1 — Format
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
+    if not bool(re.match(pattern, email)):
+        print(f"   ❌ Format invalide : {email}")
+        return False
 
-# ─────────────────────────────────────────
+    # Couche 2 — DNS
+    dns_valide, mx_serveur = verifier_dns(email)
+    if not dns_valide:
+        print(f"   ❌ Domaine inexistant : {email}")
+        return False
+
+    # Couche 3 — SMTP
+    smtp_valide = verifier_smtp(email, mx_serveur)
+    if not smtp_valide:
+        print(f"   ❌ Boîte inexistante : {email}")
+        return False
+
+    print(f"   ✅ Email vérifié : {email}")
+    return True
+
 # CALCUL DU SCORE
-# ─────────────────────────────────────────
 
 def calculer_score(secteur, ville, telephone, website, nom):
     score = 0
@@ -112,9 +142,7 @@ def calculer_score(secteur, ville, telephone, website, nom):
 
     return score
 
-# ─────────────────────────────────────────
 # APPEL GOOGLE PLACES API (NEW)
-# ─────────────────────────────────────────
 
 def chercher_places(query, ville):
     url = "https://places.googleapis.com/v1/places:searchText"
@@ -142,9 +170,7 @@ def get_details_place(place):
         'formatted_address': place.get('formattedAddress', '')
     }
 
-# ─────────────────────────────────────────
 # EXTRACTION EMAIL DEPUIS SITE WEB
-# ─────────────────────────────────────────
 
 def extraire_email_depuis_site(website):
     try:
@@ -157,9 +183,7 @@ def extraire_email_depuis_site(website):
         pass
     return None
 
-# ─────────────────────────────────────────
 # SAUVEGARDE PROSPECT
-# ─────────────────────────────────────────
 
 def sauvegarder_prospect(prospect):
     conn = connect_db()
@@ -188,9 +212,7 @@ def sauvegarder_prospect(prospect):
     finally:
         conn.close()
 
-# ─────────────────────────────────────────
 # LOG SCRAPING
-# ─────────────────────────────────────────
 
 def logger_scraping(source, nombre_collectes, nombre_valides, statut):
     conn = connect_db()
@@ -206,9 +228,7 @@ def logger_scraping(source, nombre_collectes, nombre_valides, statut):
     finally:
         conn.close()
 
-# ─────────────────────────────────────────
 # SCRAPER PRINCIPAL
-# ─────────────────────────────────────────
 
 def scraper(secteurs, villes, source_label):
     tous_prospects = []
@@ -259,9 +279,7 @@ def scraper(secteurs, villes, source_label):
 
     return tous_prospects
 
-# ─────────────────────────────────────────
 # LANCEMENT
-# ─────────────────────────────────────────
 
 if __name__ == "__main__":
     tous_prospects = []
