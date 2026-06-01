@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import pymysql
 from datetime import datetime, timedelta
+import json
 
 load_dotenv()
 
@@ -33,7 +34,36 @@ def connect_db():
         database=os.getenv('DB_NAME'),
         charset='utf8mb4'
     )
+# ─────────────────────────────────────────
+# THÈMES TOURISTIQUES PM TRAVEL
+# ─────────────────────────────────────────
 
+THEMES_TOURISTIQUES = {
+    'desert': {
+        'description': 'circuits désert Sahara Merzouga dunes coucher soleil',
+        'hashtags': ['#Sahara', '#Merzouga', '#MarocDesert']
+    },
+    'medina': {
+        'description': 'médina Marrakech souks riads architecture',
+        'hashtags': ['#Marrakech', '#Medina', '#Riad']
+    },
+    'montagne': {
+        'description': 'montagnes Atlas randonnée villages berbères',
+        'hashtags': ['#AtlasMountains', '#Hiking', '#BerberVillage']
+    },
+    'gastronomie': {
+        'description': 'cuisine marocaine tajine couscous épices',
+        'hashtags': ['#MarocCuisine', '#Tajine', '#Couscous']
+    },
+    'luxe': {
+        'description': 'séjours luxe riads palais spa exclusifs',
+        'hashtags': ['#LuxuryMorocco', '#RiadLuxe', '#SpaMaroc']
+    },
+    'aventure': {
+        'description': 'aventure quad buggy escalade sports extrêmes',
+        'hashtags': ['#AdventureMorocco', '#Quad', '#ExtremeTravel']
+    }
+}
 # ─────────────────────────────────────────
 # DÉTECTION DE LANGUE
 # ─────────────────────────────────────────
@@ -240,11 +270,17 @@ def construire_html_email(contenu, nom_prospect):
 # ─────────────────────────────────────────
 
 def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
+    # AJOUTE CES 3 LIGNES AU DÉBUT:
+    if os.getenv('ENV') == 'test':
+        destinataire = os.getenv('TEST_EMAIL', 'chaimaaait2005@gmail.com')
+        print(f"   🧪 MODE TEST: Email envoyé à {destinataire}")
+    
+    # LE RESTE RESTE IDENTIQUE:
     html = construire_html_email(contenu_texte, nom_prospect)
 
     message = Mail(
         from_email=os.getenv('SENDGRID_FROM_EMAIL'),
-        to_emails=destinataire,
+        to_emails=destinataire,  # ← Maintenant c'est ton email en test!
         subject=sujet,
         html_content=html
     )
@@ -300,5 +336,86 @@ def creer_sequence(campagne_id, prospect_id):
         conn.commit()
     except Exception as e:
         print(f"Erreur séquence : {e}")
+    finally:
+        conn.close()
+# ─────────────────────────────────────────
+# GESTION DE LA ROTATION DES THÈMES
+# ─────────────────────────────────────────
+
+def obtenir_theme_courant(plateforme):
+    """Récupère le thème actuel pour une plateforme"""
+    conn = connect_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT theme_index, themes_list
+                FROM rotation_themes
+                WHERE plateforme = %s
+            """, (plateforme,))
+            
+            result = cursor.fetchone()
+            if not result:
+                cursor.execute("""
+                    INSERT INTO rotation_themes (plateforme)
+                    VALUES (%s)
+                """, (plateforme,))
+                conn.commit()
+                return list(THEMES_TOURISTIQUES.keys())[0]
+            
+            theme_index = result[0]
+            themes_list = json.loads(result[1])
+            theme = themes_list[theme_index % len(themes_list)]
+            return theme
+    finally:
+        conn.close()
+
+
+def incrementer_theme_index(plateforme):
+    """Avance au thème suivant"""
+    conn = connect_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE rotation_themes
+                SET theme_index = (theme_index + 1) % 18
+                WHERE plateforme = %s
+            """, (plateforme,))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def obtenir_position_rotation(plateforme):
+    """Récupère la position actuelle dans la rotation"""
+    conn = connect_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT theme_index
+                FROM rotation_themes
+                WHERE plateforme = %s
+            """, (plateforme,))
+            
+            result = cursor.fetchone()
+            return result[0] if result else 0
+    finally:
+        conn.close()
+
+
+def obtenir_tous_les_themes(plateforme):
+    """Récupère la liste des thèmes"""
+    conn = connect_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT themes_list
+                FROM rotation_themes
+                WHERE plateforme = %s
+            """, (plateforme,))
+            
+            result = cursor.fetchone()
+            if result:
+                return json.loads(result[0])
+            return list(THEMES_TOURISTIQUES.keys())
     finally:
         conn.close()
