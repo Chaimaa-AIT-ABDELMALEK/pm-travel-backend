@@ -270,17 +270,11 @@ def construire_html_email(contenu, nom_prospect):
 # ─────────────────────────────────────────
 
 def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
-    # AJOUTE CES 3 LIGNES AU DÉBUT:
-    if os.getenv('ENV') == 'test':
-        destinataire = os.getenv('TEST_EMAIL', 'chaimaaait2005@gmail.com')
-        print(f"   🧪 MODE TEST: Email envoyé à {destinataire}")
-    
-    # LE RESTE RESTE IDENTIQUE:
     html = construire_html_email(contenu_texte, nom_prospect)
 
     message = Mail(
         from_email=os.getenv('SENDGRID_FROM_EMAIL'),
-        to_emails=destinataire,  # ← Maintenant c'est ton email en test!
+        to_emails=destinataire,
         subject=sujet,
         html_content=html
     )

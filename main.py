@@ -167,7 +167,13 @@ class Prospect(BaseModel):
     source: Optional[str] = None
     score: Optional[int] = 0
     email_valide: Optional[bool] = False
-
+class SMTPConfig(BaseModel):
+    provider: str
+    email: str
+    password: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    secure: Optional[bool] = True
 # ═══════════════════════════════════════════
 # ROUTES AUTHENTIFICATION
 # ═══════════════════════════════════════════
@@ -412,7 +418,6 @@ def lancer_campagne(campagne_id: int, current_user = Depends(get_current_user)):
             "envoyes": envoyes,
             "echecs": echecs
         }
-
 @app.get("/campagnes/stats/kpis")
 def get_kpis_campagnes(current_user = Depends(get_current_user)):
     """Récupère les KPIs des campagnes"""
@@ -549,10 +554,9 @@ def save_api_config(api_name: str, config: dict, current_user = Depends(get_curr
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/settings/smtp")
-def save_smtp_config(provider: str, email: str, password: str, host: str = None, port: int = None, secure: bool = True, current_user = Depends(get_current_user)):
-    """Sauvegarde la configuration SMTP"""
+def save_smtp_config(config: SMTPConfig, current_user = Depends(get_current_user)):
     try:
-        encrypted_password = CIPHER_SUITE.encrypt(password.encode()).decode()
+        encrypted_password = CIPHER_SUITE.encrypt(config.password.encode()).decode()
         
         with engine.connect() as conn:
             conn.execute(text("""
@@ -560,16 +564,16 @@ def save_smtp_config(provider: str, email: str, password: str, host: str = None,
                 (user_id, provider, email, password, host, port, secure, smtp_enabled)
                 VALUES (:user_id, :provider, :email, :password, :host, :port, :secure, true)
                 ON DUPLICATE KEY UPDATE
-                provider = :provider, email = :email, password = :password, 
+                provider = :provider, email = :email, password = :password,
                 host = :host, port = :port, secure = :secure, smtp_enabled = true
             """), {
                 "user_id": current_user['user_id'],
-                "provider": provider,
-                "email": email,
+                "provider": config.provider,
+                "email": config.email,
                 "password": encrypted_password,
-                "host": host,
-                "port": port,
-                "secure": secure
+                "host": config.host,
+                "port": config.port,
+                "secure": config.secure
             })
             conn.commit()
         return {"message": "✅ SMTP configuré!"}
@@ -577,35 +581,37 @@ def save_smtp_config(provider: str, email: str, password: str, host: str = None,
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/settings/smtp/test")
-def test_smtp(provider: str, email: str, password: str, host: str = None, port: int = None, secure: bool = True, current_user = Depends(get_current_user)):
-    """Teste la connexion SMTP"""
+async def test_smtp(config: SMTPConfig, current_user = Depends(get_current_user)):
+    """Tester l'envoi d'email avec SendGrid"""
     try:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
         
-        if secure:
-            server = smtplib.SMTP_SSL(host, port)
-        else:
-            server = smtplib.SMTP(host, port)
-            server.starttls()
+        api_key = os.getenv('SENDGRID_API_KEY')
+        from_email = os.getenv('SENDGRID_FROM_EMAIL')
+        test_email = os.getenv('TEST_EMAIL')
         
-        server.login(email, password)
+        if not api_key or not from_email or not test_email:
+            raise HTTPException(status_code=400, detail="SendGrid non configuré dans .env")
         
-        msg = MIMEMultipart()
-        msg['From'] = email
-        msg['To'] = email
-        msg['Subject'] = "🧪 PM Travel - SMTP Test Email"
+        sg = sendgrid.SendGridAPIClient(api_key)
         
-        body = "Si tu reçois cet email, SMTP fonctionne! ✅"
-        msg.attach(MIMEText(body, 'plain'))
+        mail = Mail(
+            from_email=from_email,
+            to_emails=test_email,
+            subject="🧪 Test Email - PM Travel",
+            plain_text_content="Ceci est un email de test de PM Travel Agency!"
+        )
         
-        server.send_message(msg)
-        server.quit()
+        response = sg.send(mail)
         
-        return {"message": "✅ Email de test envoyé!"}
+        return {
+            "success": True,
+            "message": f"Email test envoyé à {test_email}",
+            "status_code": response.status_code
+        }
     except Exception as e:
-        return {"error": f"❌ Erreur SMTP: {str(e)}"}, 500
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/settings/imap")
 def save_imap_config(provider: str, email: str, password: str, host: str = None, port: int = None, secure: bool = True, sync_interval: int = 5, current_user = Depends(get_current_user)):
@@ -761,7 +767,6 @@ def traiter_relances(current_user = Depends(get_current_user)):
 
         conn.commit()
         return {"message": f"{relances} relances envoyées ✅", "relances": relances}
-
 @app.get("/sequences")
 def get_sequences(current_user = Depends(get_current_user)):
     """Récupère les séquences"""
