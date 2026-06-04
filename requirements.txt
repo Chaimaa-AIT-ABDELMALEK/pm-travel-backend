@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+pymysql
+python-dotenv
+redis
+openai
+sendgrid
+pyjwt
+bcrypt
+cryptography
+sentry-sdk
+apscheduler
+requests
+dnspython
