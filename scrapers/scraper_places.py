@@ -1,16 +1,18 @@
-import requests #appeler l'api google places et visiter les sites web des prospects pour extraire les emails
-import pymysql #connecter python a mysql
-import re #expressions regulieres de python pour extraire les emails et verifier leur format
-import time #pause entre chaque prospect
-from dotenv import load_dotenv #lie et charge le fichier .env
-import os #acceder aux valeurs du .env
-import dns.resolver #demander au dns si un email et son domaine existent
-import smtplib #se connecter aux serveurs mail smtp
-import socket #gere les connexions reaseau
+import requests
+import pymysql
+import re
+import time
+from dotenv import load_dotenv
+import os
+import dns.resolver
+import smtplib
+import socket
+import sys
+import json
 
-load_dotenv() #transforme les variables dans .env en variables utilisables dans le code (os.getenv("DB_HOST")  → "localhost")
+load_dotenv()
 
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') #ne change pas dans le code
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # CONFIGURATION
 
@@ -44,51 +46,48 @@ SECTEURS_AGENCES = [
 # CONNEXION BASE DE DONNÉES
 
 def connect_db():
-    return pymysql.connect( #retourne une nouvelle con
+    return pymysql.connect(
         host=os.getenv('DB_HOST'),
-        port=int(os.getenv('DB_PORT')), #convertit le string en entier
+        port=int(os.getenv('DB_PORT')),
         user=os.getenv('DB_USER'),
         password=os.getenv('DB_PASSWORD'),
         database=os.getenv('DB_NAME'),
-        charset='utf8mb4' #supporte tous les caracteres speciaux
+        charset='utf8mb4'
     )
 
 # VALIDATION EMAIL
 
 def verifier_dns(email):
-    domaine = email.split('@')[1] #split divise l'email autour de @ et retourne une liste puis on prend le deuxieme element comme domaine
+    domaine = email.split('@')[1]
     try:
-        records = dns.resolver.resolve(domaine, 'MX') #les enregistrement mx pour savoir quel est le serveur
-        return True, str(records[0].exchange) #chercher les serveurs mail et choisir le premier element
+        records = dns.resolver.resolve(domaine, 'MX')
+        return True, str(records[0].exchange)
     except:
-        return False, None #si le serveur n'est pas trouve return false,none
+        return False, None
 
 def verifier_smtp(email, mx_serveur):
     try:
-        serveur = smtplib.SMTP(timeout=10) #se le serveur ne repond pas en 10s on abandonne
-        serveur.connect(mx_serveur) #se connecter au serveur mail du domaine
-        serveur.helo('gmail.com') #se presenter envoyant hello pour que gmail.com pour paraitre legitime
-        serveur.mail('test@gmail.com')# envoyer un message test
-        code, message = serveur.rcpt(email)#demander si la livraison de l'email a cette adresse est possible
-        serveur.quit() #fermer la connexion sntp
-        return code == 250 #250 est true les autres sont fausses
+        serveur = smtplib.SMTP(timeout=10)
+        serveur.connect(mx_serveur)
+        serveur.helo('gmail.com')
+        serveur.mail('test@gmail.com')
+        code, message = serveur.rcpt(email)
+        serveur.quit()
+        return code == 250
     except:
         return False
 
 def valider_email(email):
-    # Couche 1 — Format
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     if not bool(re.match(pattern, email)):
         print(f"   ❌ Format invalide : {email}")
         return False
 
-    # Couche 2 — DNS
     dns_valide, mx_serveur = verifier_dns(email)
     if not dns_valide:
         print(f"   ❌ Domaine inexistant : {email}")
         return False
 
-    # Couche 3 — SMTP
     smtp_valide = verifier_smtp(email, mx_serveur)
     if not smtp_valide:
         print(f"   ❌ Boîte inexistante : {email}")
@@ -142,25 +141,95 @@ def calculer_score(secteur, ville, telephone, website, nom):
 
     return score
 
-# APPEL GOOGLE PLACES API (NEW)
+# COORDONNÉES DES VILLES - Liste en dur (plus rapide et fiable)
+
+VILLES_COORDONNEES = {
+    # MAROC
+    'marrakech': (31.6295, -8.0089),
+    'casablanca': (33.5731, -7.5898),
+    'agadir': (30.4203, -9.5981),
+    'fes': (34.0334, -5.0024),
+    'rabat': (34.0209, -6.8416),
+    'chefchaouen': (35.1684, -5.2698),
+    'tanger': (35.7596, -5.8018),
+    'ouarzazate': (30.9315, -6.5092),
+    'merzouga': (31.1521, -4.0097),
+    # AMÉRIQUE DU NORD
+    'new york': (40.7128, -74.0060),
+    'los angeles': (34.0522, -118.2437),
+    'miami': (25.7617, -80.1918),
+    'chicago': (41.8781, -87.6298),
+    'toronto': (43.6532, -79.3832),
+    'montreal': (45.5017, -73.5673),
+    'mexico city': (19.4326, -99.1332),
+    # AMÉRIQUE DU SUD
+    'sao paulo': (-23.5505, -46.6333),
+    'rio de janeiro': (-22.9068, -43.1729),
+    'buenos aires': (-34.6037, -58.3816),
+    'bogota': (4.7110, -74.0721),
+    'santiago': (-33.4489, -70.6693),
+    'lima': (-12.0464, -77.0428),
+}
+
+def geocoder_ville(ville):
+    """Retourne les coordonnées d'une ville depuis la liste en dur"""
+    ville_lower = ville.lower()
+    
+    if ville_lower in VILLES_COORDONNEES:
+        lat, lng = VILLES_COORDONNEES[ville_lower]
+        print(f"   📍 Coordonnées trouvées pour {ville}")
+        return lat, lng
+    else:
+        print(f"❌ Ville non trouvée: {ville}")
+        return None, None
+
+# APPEL GOOGLE PLACES API - AVEC RESTRICTION GÉOGRAPHIQUE
 
 def chercher_places(query, ville):
-    url = "https://places.googleapis.com/v1/places:searchText"
+    """Recherche avec restriction géographique à la ville"""
+    
+    lat, lng = geocoder_ville(ville)
+    
+    if not lat or not lng:
+        print(f"❌ Impossible de géocoder: {ville}")
+        return []
+    
+    print(f"   📍 Coordonnées de {ville}: ({lat}, {lng})")
+    
+    url = "https://places.googleapis.com/v1/places:searchNearby"
     headers = {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_API_KEY,
         'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.id'
     }
+    
     body = {
-        "textQuery": f"{query} {ville}",
+        "locationRestriction": {
+            "circle": {
+                "center": {
+                    "latitude": lat,
+                    "longitude": lng
+                },
+                "radius": 15000
+            }
+        },
+        "textQuery": query,
         "languageCode": "fr"
     }
-    res = requests.post(url, headers=headers, json=body)
-    data = res.json()
-    if data.get('error'):
-        print(f"❌ Erreur API : {data.get('error', {}).get('message')}")
+    
+    try:
+        res = requests.post(url, headers=headers, json=body, timeout=30)
+        data = res.json()
+        
+        if data.get('error'):
+            print(f"❌ Erreur API : {data.get('error', {}).get('message')}")
+            return []
+        
+        places = data.get('places', [])
+        return places
+    except Exception as e:
+        print(f"❌ Erreur recherche Google Places: {e}")
         return []
-    return data.get('places', [])
 
 def get_details_place(place):
     return {
@@ -284,31 +353,83 @@ def scraper(secteurs, villes, source_label):
 if __name__ == "__main__":
     tous_prospects = []
 
-    # PARTIE 1 — Hôtels, Riads, Transport au Maroc
-    print("\n" + "="*50)
-    print("PARTIE 1 — Hôtels & Transport au Maroc")
-    print("="*50)
-    prospects_maroc = scraper(SECTEURS_HOTELS, VILLES_HOTELS, 'Google Maps Maroc')
-    tous_prospects.extend(prospects_maroc)
-    logger_scraping('Google Maps Maroc', len(prospects_maroc),
-                    len([p for p in prospects_maroc if p['email_valide']]), 'succès')
+    if len(sys.argv) > 2:
+        secteur = sys.argv[1]
+        ville = sys.argv[2]
+        print(f"\n🚀 Mode manuel: {secteur} à {ville}")
+        
+        print(f"🔍 Recherche : {secteur} à {ville}")
+        places = chercher_places(secteur, ville)
 
-    # PARTIE 2 — Agences & Tour Operators étrangers
-    print("\n" + "="*50)
-    print("PARTIE 2 — Agences & Tour Operators Étrangers")
-    print("="*50)
-    prospects_etranger = scraper(SECTEURS_AGENCES, VILLES_AGENCES, 'Google Maps Étranger')
-    tous_prospects.extend(prospects_etranger)
-    logger_scraping('Google Maps Étranger', len(prospects_etranger),
-                    len([p for p in prospects_etranger if p['email_valide']]), 'succès')
+        for place in places:
+            try:
+                details = get_details_place(place)
+                nom = details.get('name', '')
+                telephone = details.get('formatted_phone_number', '')
+                website = details.get('website', '')
 
-    # RÉSUMÉ FINAL
-    total = len(tous_prospects)
-    valides = len([p for p in tous_prospects if p['email_valide']])
-    print("\n" + "="*50)
-    print("RÉSUMÉ FINAL")
-    print("="*50)
-    print(f"Total prospects collectés  : {total}")
-    print(f"Emails valides             : {valides}")
-    print(f"Hôtels Maroc               : {len(prospects_maroc)}")
-    print(f"Agences étrangères         : {len(prospects_etranger)}")
+                email = None
+                if website:
+                    email = extraire_email_depuis_site(website)
+
+                if not email:
+                    nom_clean = nom.lower().replace(' ', '').replace("'", '')[:20]
+                    email = f"contact@{nom_clean}.com"
+
+                email_valide = valider_email(email)
+                score = calculer_score(secteur, ville, telephone, website, nom)
+
+                prospect = {
+                    'nom': nom,
+                    'email': email,
+                    'telephone': telephone,
+                    'secteur': secteur,
+                    'ville': ville,
+                    'source': 'Google Places',
+                    'score': score,
+                    'email_valide': email_valide
+                }
+
+                if sauvegarder_prospect(prospect):
+                    tous_prospects.append(prospect)
+                    print(f"✅ {nom} | {ville} | Score: {score} | Email: {email}")
+
+                time.sleep(0.5)
+
+            except Exception as e:
+                print(f"❌ Erreur : {e}")
+                continue
+    else:
+        print("\n" + "="*50)
+        print("PARTIE 1 — Hôtels & Transport au Maroc")
+        print("="*50)
+        prospects_maroc = scraper(SECTEURS_HOTELS, VILLES_HOTELS, 'Google Maps Maroc')
+        tous_prospects.extend(prospects_maroc)
+        logger_scraping('Google Maps Maroc', len(prospects_maroc),
+                        len([p for p in prospects_maroc if p['email_valide']]), 'succès')
+
+        print("\n" + "="*50)
+        print("PARTIE 2 — Agences & Tour Operators Étrangers")
+        print("="*50)
+        prospects_etranger = scraper(SECTEURS_AGENCES, VILLES_AGENCES, 'Google Maps Étranger')
+        tous_prospects.extend(prospects_etranger)
+        logger_scraping('Google Maps Étranger', len(prospects_etranger),
+                        len([p for p in prospects_etranger if p['email_valide']]), 'succès')
+
+        total = len(tous_prospects)
+        valides = len([p for p in tous_prospects if p['email_valide']])
+        print("\n" + "="*50)
+        print("RÉSUMÉ FINAL")
+        print("="*50)
+        print(f"Total prospects collectés  : {total}")
+        print(f"Emails valides             : {valides}")
+        print(f"Hôtels Maroc               : {len(prospects_maroc)}")
+        print(f"Agences étrangères         : {len(prospects_etranger)}")
+
+    result = {
+        'found': len(tous_prospects),
+        'prospects': tous_prospects,
+        'logs': []
+    }
+    
+    print(json.dumps(result))

@@ -1,0 +1,201 @@
+{
+  "name": "Social Media Automatique",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [-600, 0],
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Schedule Trigger (Lundi 7h)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/social/calendrier/generer",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-380, 0],
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "Générer Calendrier Semaine"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-001",
+              "leftValue": "={{ $json.total_posts }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-160, 0],
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Posts générés ?"
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [60, -100],
+      "id": "a1b2c3d4-0001-0001-0001-000000000004",
+      "name": "Wait 30min (publication différée)",
+      "webhookId": "social-wait-001"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/social/posts/planifies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [280, -100],
+      "id": "a1b2c3d4-0001-0001-0001-000000000005",
+      "name": "Récupérer Posts Planifiés"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-002",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [500, -100],
+      "id": "a1b2c3d4-0001-0001-0001-000000000006",
+      "name": "Posts à publier ?"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://localhost:8000/social/posts/{{ $json[0].id }}/statut?statut=publié",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [720, -200],
+      "id": "a1b2c3d4-0001-0001-0001-000000000007",
+      "name": "Marquer Post Publié"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/social/post/generer?plateforme=instagram&theme=medina&langue=français",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [720, 0],
+      "id": "a1b2c3d4-0001-0001-0001-000000000008",
+      "name": "Générer Post Instagram (fallback)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/social/post/generer?plateforme=facebook&theme=desert&langue=français",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [720, 120],
+      "id": "a1b2c3d4-0001-0001-0001-000000000009",
+      "name": "Générer Post Facebook (fallback)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (Lundi 7h)": {
+      "main": [[{"node": "Générer Calendrier Semaine", "type": "main", "index": 0}]]
+    },
+    "Générer Calendrier Semaine": {
+      "main": [[{"node": "Posts générés ?", "type": "main", "index": 0}]]
+    },
+    "Posts générés ?": {
+      "main": [
+        [{"node": "Wait 30min (publication différée)", "type": "main", "index": 0}],
+        [{"node": "Générer Post Instagram (fallback)", "type": "main", "index": 0}]
+      ]
+    },
+    "Wait 30min (publication différée)": {
+      "main": [[{"node": "Récupérer Posts Planifiés", "type": "main", "index": 0}]]
+    },
+    "Récupérer Posts Planifiés": {
+      "main": [[{"node": "Posts à publier ?", "type": "main", "index": 0}]]
+    },
+    "Posts à publier ?": {
+      "main": [
+        [{"node": "Marquer Post Publié", "type": "main", "index": 0}],
+        [{"node": "Générer Post Facebook (fallback)", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "social-media-v1-pmtravel",
+  "meta": {
+    "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
+  },
+  "id": "SocialMediaPMTravel01",
+  "tags": []
+}

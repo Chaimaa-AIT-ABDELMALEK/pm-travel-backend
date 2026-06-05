@@ -13,3 +13,5 @@ sentry-sdk
 apscheduler
 requests
 dnspython
+dnspython==2.6.1
+requests==2.31.0

@@ -1,0 +1,314 @@
+{
+  "name": "Orchestration Agents IA",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [-800, 0],
+      "id": "b2c3d4e5-0002-0002-0002-000000000001",
+      "name": "Schedule Trigger (chaque heure)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/social/post/generer?plateforme=instagram&theme=medina",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "agent_type",
+              "value": "analytics"
+            },
+            {
+              "name": "payload",
+              "value": "{\"action\": \"snapshot\"}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-580, 0],
+      "id": "b2c3d4e5-0002-0002-0002-000000000002",
+      "name": "Snapshot Analytics KPIs"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/prospects/stats/kpis",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-360, 0],
+      "id": "b2c3d4e5-0002-0002-0002-000000000003",
+      "name": "GET KPIs Prospects"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/campagnes/stats/kpis",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-360, 140],
+      "id": "b2c3d4e5-0002-0002-0002-000000000004",
+      "name": "GET KPIs Campagnes"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-orch-001",
+              "leftValue": "={{ $json.nouveaux }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-140, 0],
+      "id": "b2c3d4e5-0002-0002-0002-000000000005",
+      "name": "Nouveaux prospects ?"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/prospects",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [80, -100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000006",
+      "name": "Récupérer Prospects Nouveaux"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/campagnes?nom=Campagne+Auto+Orchestrateur&sujet=Partenariat+PM+Travel",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [300, -100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000007",
+      "name": "Créer Campagne Auto"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:8000/campagnes/{{ $json.id }}/lancer",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [520, -100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000008",
+      "name": "Lancer Campagne"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "hours"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [740, -100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000009",
+      "name": "Wait 2h",
+      "webhookId": "orch-wait-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/sequences/relances",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [960, -100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000010",
+      "name": "Déclencher Relances Email"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-orch-002",
+              "leftValue": "={{ $json.relances }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1180, -100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000011",
+      "name": "Relances envoyées ?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/social/post/generer?plateforme=linkedin&theme=luxe&langue=français",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1400, -200],
+      "id": "b2c3d4e5-0002-0002-0002-000000000012",
+      "name": "Post LinkedIn après relances"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/scraper/lancer",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [80, 100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000013",
+      "name": "Lancer Scraper (pas de prospects)"
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [300, 100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000014",
+      "name": "Wait 30min scraper",
+      "webhookId": "orch-wait-002"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/prospects/stats/kpis",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [520, 100],
+      "id": "b2c3d4e5-0002-0002-0002-000000000015",
+      "name": "Vérifier résultat scraper"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (chaque heure)": {
+      "main": [[{"node": "Snapshot Analytics KPIs", "type": "main", "index": 0}]]
+    },
+    "Snapshot Analytics KPIs": {
+      "main": [[{"node": "GET KPIs Prospects", "type": "main", "index": 0}]]
+    },
+    "GET KPIs Prospects": {
+      "main": [
+        [{"node": "Nouveaux prospects ?", "type": "main", "index": 0}],
+        [{"node": "GET KPIs Campagnes", "type": "main", "index": 0}]
+      ]
+    },
+    "Nouveaux prospects ?": {
+      "main": [
+        [{"node": "Récupérer Prospects Nouveaux", "type": "main", "index": 0}],
+        [{"node": "Lancer Scraper (pas de prospects)", "type": "main", "index": 0}]
+      ]
+    },
+    "Récupérer Prospects Nouveaux": {
+      "main": [[{"node": "Créer Campagne Auto", "type": "main", "index": 0}]]
+    },
+    "Créer Campagne Auto": {
+      "main": [[{"node": "Lancer Campagne", "type": "main", "index": 0}]]
+    },
+    "Lancer Campagne": {
+      "main": [[{"node": "Wait 2h", "type": "main", "index": 0}]]
+    },
+    "Wait 2h": {
+      "main": [[{"node": "Déclencher Relances Email", "type": "main", "index": 0}]]
+    },
+    "Déclencher Relances Email": {
+      "main": [[{"node": "Relances envoyées ?", "type": "main", "index": 0}]]
+    },
+    "Relances envoyées ?": {
+      "main": [
+        [{"node": "Post LinkedIn après relances", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Lancer Scraper (pas de prospects)": {
+      "main": [[{"node": "Wait 30min scraper", "type": "main", "index": 0}]]
+    },
+    "Wait 30min scraper": {
+      "main": [[{"node": "Vérifier résultat scraper", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "orchestration-v1-pmtravel",
+  "meta": {
+    "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
+  },
+  "id": "OrchestrationPMTravel01",
+  "tags": []
+}
