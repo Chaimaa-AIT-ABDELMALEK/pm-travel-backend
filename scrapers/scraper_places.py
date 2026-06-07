@@ -10,9 +10,21 @@ import socket
 import sys
 import json
 
+# Sous Windows, la console utilise cp1252 par défaut et ne peut pas afficher
+# les emojis (🔍, 📍, ✅...). On force la sortie en UTF-8 pour éviter
+# UnicodeEncodeError: 'charmap' codec can't encode character ...
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
+if not GOOGLE_API_KEY:
+    print("⚠️ GOOGLE_API_KEY absente du fichier .env — les recherches Google Places échoueront (0 prospect).")
 
 # CONFIGURATION
 
@@ -196,15 +208,19 @@ def chercher_places(query, ville):
     
     print(f"   📍 Coordonnées de {ville}: ({lat}, {lng})")
     
-    url = "https://places.googleapis.com/v1/places:searchNearby"
+    # On utilise searchText (recherche par texte) car on a une requête type "hotel", "riad"...
+    # searchText accepte le champ textQuery, contrairement à searchNearby.
+    url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_API_KEY,
         'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.id'
     }
-    
+
     body = {
-        "locationRestriction": {
+        "textQuery": f"{query} {ville}",
+        "languageCode": "fr",
+        "locationBias": {
             "circle": {
                 "center": {
                     "latitude": lat,
@@ -212,19 +228,26 @@ def chercher_places(query, ville):
                 },
                 "radius": 15000
             }
-        },
-        "textQuery": query,
-        "languageCode": "fr"
+        }
     }
     
     try:
         res = requests.post(url, headers=headers, json=body, timeout=30)
-        data = res.json()
-        
-        if data.get('error'):
-            print(f"❌ Erreur API : {data.get('error', {}).get('message')}")
+
+        # Diagnostic : si la réponse n'est pas du JSON exploitable, afficher la cause réelle
+        try:
+            data = res.json()
+        except ValueError:
+            print(f"❌ Réponse non-JSON de Google (HTTP {res.status_code}) : {res.text[:300]}")
+            if res.status_code in (401, 403):
+                print("   → Clé API invalide, restreinte, ou 'Places API (New)' non activée / facturation absente.")
             return []
-        
+
+        if res.status_code != 200 or data.get('error'):
+            err = data.get('error', {})
+            print(f"❌ Erreur API Google (HTTP {res.status_code}) : {err.get('message', res.text[:200])}")
+            return []
+
         places = data.get('places', [])
         return places
     except Exception as e:
@@ -273,17 +296,20 @@ def sauvegarder_prospect(prospect):
                 prospect['score'],
                 prospect['email_valide']
             ))
+            # rowcount == 1 => ligne insérée ; == 0 => doublon ignoré (INSERT IGNORE)
+            inserted = cursor.rowcount == 1
         conn.commit()
-        return True
+        return 'inserted' if inserted else 'skipped'
     except Exception as e:
         print(f"Erreur sauvegarde : {e}")
-        return False
+        return 'error'
     finally:
         conn.close()
 
 # LOG SCRAPING
 
 def logger_scraping(source, nombre_collectes, nombre_valides, statut):
+    """Ancien log (table logs_scraping) — conservé pour debug."""
     conn = connect_db()
     try:
         with conn.cursor() as cursor:
@@ -294,18 +320,44 @@ def logger_scraping(source, nombre_collectes, nombre_valides, statut):
             """
             cursor.execute(sql, (source, nombre_collectes, nombre_valides, statut))
         conn.commit()
+    except Exception as e:
+        print(f"Erreur logs_scraping : {e}")
+    finally:
+        conn.close()
+
+
+def enregistrer_historique(user_id, sector, city, inserted, skipped, statut='completed'):
+    """Trace une exécution dans scraping_history.
+    prospects_found = total traité ; logs (JSON) = {inserted, skipped}."""
+    conn = connect_db()
+    try:
+        total = inserted + skipped
+        details = json.dumps({'inserted': inserted, 'skipped': skipped})
+        with conn.cursor() as cursor:
+            sql = """
+                INSERT INTO scraping_history 
+                (user_id, sector, city, prospects_found, logs, status)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(sql, (user_id, sector, city, total, details, statut))
+        conn.commit()
+    except Exception as e:
+        print(f"Erreur scraping_history : {e}")
     finally:
         conn.close()
 
 # SCRAPER PRINCIPAL
 
-def scraper(secteurs, villes, source_label):
+def scraper(secteurs, villes, source_label, user_id=None):
     tous_prospects = []
 
     for ville in villes:
         for secteur in secteurs:
             print(f"🔍 Recherche : {secteur} à {ville}")
             places = chercher_places(secteur, ville)
+
+            inserted = 0
+            skipped = 0
 
             for place in places:
                 try:
@@ -336,15 +388,24 @@ def scraper(secteurs, villes, source_label):
                         'email_valide': email_valide
                     }
 
-                    if sauvegarder_prospect(prospect):
+                    resultat = sauvegarder_prospect(prospect)
+                    if resultat == 'inserted':
+                        inserted += 1
                         tous_prospects.append(prospect)
                         print(f"✅ {nom} | {ville} | Score: {score} | Email: {email}")
+                    elif resultat == 'skipped':
+                        skipped += 1
+                        print(f"⏭️ Doublon ignoré : {nom} | {ville}")
 
                     time.sleep(0.5)
 
                 except Exception as e:
                     print(f"❌ Erreur : {e}")
                     continue
+
+            # Trace cette combinaison secteur+ville dans l'historique (inséré + ignoré)
+            if user_id is not None and (inserted + skipped) > 0:
+                enregistrer_historique(user_id, secteur, ville, inserted, skipped, 'completed')
 
     return tous_prospects
 
@@ -353,13 +414,28 @@ def scraper(secteurs, villes, source_label):
 if __name__ == "__main__":
     tous_prospects = []
 
-    if len(sys.argv) > 2:
-        secteur = sys.argv[1]
-        ville = sys.argv[2]
+    # Récupère --user-id N s'il est fourni (passé par le backend), et nettoie argv
+    user_id = None
+    args = sys.argv[1:]
+    if '--user-id' in args:
+        idx = args.index('--user-id')
+        try:
+            user_id = int(args[idx + 1])
+        except (IndexError, ValueError):
+            user_id = None
+        # retire --user-id et sa valeur de la liste d'arguments
+        del args[idx:idx + 2]
+
+    if len(args) >= 2:
+        secteur = args[0]
+        ville = args[1]
         print(f"\n🚀 Mode manuel: {secteur} à {ville}")
-        
+
         print(f"🔍 Recherche : {secteur} à {ville}")
         places = chercher_places(secteur, ville)
+
+        inserted = 0
+        skipped = 0
 
         for place in places:
             try:
@@ -390,31 +466,35 @@ if __name__ == "__main__":
                     'email_valide': email_valide
                 }
 
-                if sauvegarder_prospect(prospect):
+                resultat = sauvegarder_prospect(prospect)
+                if resultat == 'inserted':
+                    inserted += 1
                     tous_prospects.append(prospect)
                     print(f"✅ {nom} | {ville} | Score: {score} | Email: {email}")
+                elif resultat == 'skipped':
+                    skipped += 1
+                    print(f"⏭️ Doublon ignoré : {nom} | {ville}")
 
                 time.sleep(0.5)
 
             except Exception as e:
                 print(f"❌ Erreur : {e}")
                 continue
+
+        if user_id is not None and (inserted + skipped) > 0:
+            enregistrer_historique(user_id, secteur, ville, inserted, skipped, 'completed')
     else:
         print("\n" + "="*50)
         print("PARTIE 1 — Hôtels & Transport au Maroc")
         print("="*50)
-        prospects_maroc = scraper(SECTEURS_HOTELS, VILLES_HOTELS, 'Google Maps Maroc')
+        prospects_maroc = scraper(SECTEURS_HOTELS, VILLES_HOTELS, 'Google Maps Maroc', user_id)
         tous_prospects.extend(prospects_maroc)
-        logger_scraping('Google Maps Maroc', len(prospects_maroc),
-                        len([p for p in prospects_maroc if p['email_valide']]), 'succès')
 
         print("\n" + "="*50)
         print("PARTIE 2 — Agences & Tour Operators Étrangers")
         print("="*50)
-        prospects_etranger = scraper(SECTEURS_AGENCES, VILLES_AGENCES, 'Google Maps Étranger')
+        prospects_etranger = scraper(SECTEURS_AGENCES, VILLES_AGENCES, 'Google Maps Étranger', user_id)
         tous_prospects.extend(prospects_etranger)
-        logger_scraping('Google Maps Étranger', len(prospects_etranger),
-                        len([p for p in prospects_etranger if p['email_valide']]), 'succès')
 
         total = len(tous_prospects)
         valides = len([p for p in tous_prospects if p['email_valide']])
@@ -431,5 +511,5 @@ if __name__ == "__main__":
         'prospects': tous_prospects,
         'logs': []
     }
-    
+
     print(json.dumps(result))

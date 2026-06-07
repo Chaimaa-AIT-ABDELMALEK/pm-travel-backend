@@ -5,6 +5,14 @@ import re
 import time
 from dotenv import load_dotenv
 import os
+import sys
+
+# Force la sortie en UTF-8 (évite UnicodeEncodeError avec les emojis sous Windows)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 load_dotenv()
 
