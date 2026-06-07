@@ -9,6 +9,7 @@ import smtplib
 import socket
 import sys
 import json
+import argparse
 
 # Sous Windows, la console utilise cp1252 par défaut et ne peut pas afficher
 # les emojis (🔍, 📍, ✅...). On force la sortie en UTF-8 pour éviter
@@ -20,8 +21,15 @@ except Exception:
     pass
 
 load_dotenv()
+parser = argparse.ArgumentParser()
+parser.add_argument('--api-key', default=None, help='Google Places API key from backend')
+parser.add_argument('--user-id', default=None, type=int, help='User ID')
+parser.add_argument('secteur', nargs='?', default=None, help='Sector to search')
+parser.add_argument('ville', nargs='?', default=None, help='City to search')
+args = parser.parse_args()
 
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_API_KEY = args.api_key if args.api_key else os.getenv('GOOGLE_API_KEY')
+USER_ID = args.user_id
 
 if not GOOGLE_API_KEY:
     print("⚠️ GOOGLE_API_KEY absente du fichier .env — les recherches Google Places échoueront (0 prospect).")
@@ -414,23 +422,12 @@ def scraper(secteurs, villes, source_label, user_id=None):
 if __name__ == "__main__":
     tous_prospects = []
 
-    # Récupère --user-id N s'il est fourni (passé par le backend), et nettoie argv
-    user_id = None
-    args = sys.argv[1:]
-    if '--user-id' in args:
-        idx = args.index('--user-id')
-        try:
-            user_id = int(args[idx + 1])
-        except (IndexError, ValueError):
-            user_id = None
-        # retire --user-id et sa valeur de la liste d'arguments
-        del args[idx:idx + 2]
+    secteur = args.secteur
+    ville = args.ville
+    user_id = USER_ID
 
-    if len(args) >= 2:
-        secteur = args[0]
-        ville = args[1]
-        print(f"\n🚀 Mode manuel: {secteur} à {ville}")
-
+    if secteur and ville:
+        print(f"\n🚀 Mode ciblé: {secteur} à {ville}")
         print(f"🔍 Recherche : {secteur} à {ville}")
         places = chercher_places(secteur, ville)
 
