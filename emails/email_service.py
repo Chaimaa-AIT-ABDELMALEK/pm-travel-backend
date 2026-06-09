@@ -281,32 +281,61 @@ def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
 
     try:
         response = sg_client.send(message)
-        succes = response.status_code == 202
-        if succes:
+        status = response.status_code
+        print(f"🔍 SendGrid response status: {status}")
+        # Succès pour tous les codes 2xx
+        if 200 <= status < 300:
             print(f"   ✅ Email envoyé à {destinataire}")
+            return True
         else:
-            print(f"   ❌ Échec envoi à {destinataire} — code {response.status_code}")
+            print(f"   ❌ Échec envoi à {destinataire} — code {status}")
+            return False
+    except Exception as e:
+        print(f"   ❌ Erreur SendGrid : {e}")
+        return False
+    html = construire_html_email(contenu_texte, nom_prospect)
+
+    message = Mail(
+        from_email=os.getenv('SENDGRID_FROM_EMAIL'),
+        to_emails=destinataire,
+        subject=sujet,
+        html_content=html
+    )
+
+    try:
+        response = sg_client.send(message)
+        status = response.status_code
+        # ✅ Succès pour tous les codes 2xx (200, 201, 202, etc.)
+        succes = 200 <= status < 300
+        if succes:
+            print(f"   ✅ Email envoyé à {destinataire} (status {status})")
+        else:
+            print(f"   ❌ Échec envoi à {destinataire} — code {status}")
         return succes
     except Exception as e:
         print(f"   ❌ Erreur SendGrid : {e}")
         return False
-
+    
 # ─────────────────────────────────────────
 # SAUVEGARDER EMAIL ENVOYÉ
 # ─────────────────────────────────────────
 
 def sauvegarder_email(campagne_id, prospect_id, email, sujet, contenu, statut):
+    """Sauvegarde un email envoyé dans la table emails_envoyes"""
     conn = connect_db()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO emails_envoyes
-                (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut, date_envoi)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
             """, (campagne_id, prospect_id, email, sujet, contenu, statut))
         conn.commit()
+        print(f"   ✅ Email sauvegardé en base (prospect {prospect_id})")
+        return True
     except Exception as e:
-        print(f"Erreur sauvegarde email : {e}")
+        print(f"   ❌ Erreur sauvegarde email : {e}")
+        return False
     finally:
         conn.close()
 

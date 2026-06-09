@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Optional
 import os
+from typing import List
+from pydantic import BaseModel
+from emails.email_service import generer_contenu_email, envoyer_email, sauvegarder_email
 import sys
 import threading
 import subprocess
@@ -224,6 +227,8 @@ init_database()
 # ═══════════════════════════════════════════
 # MODELS
 # ═══════════════════════════════════════════
+class SelectionEmails(BaseModel):
+    contact_ids: List[int]
 
 class Prospect(BaseModel):
     nom: str
@@ -1155,6 +1160,40 @@ def get_kpis_campagnes(current_user = Depends(get_current_user)):
         print(f"Erreur KPIs campagnes: {e}")
         return {"total_campagnes": 0, "total_envoyes": 0, "total_ouverts": 0, "taux_ouverture": 0}
 
+# Au début du fichier, assure-toi d'avoir : from sqlalchemy import text
+
+@app.post("/campagnes/envoyer-selection")
+def envoyer_emails_selection(selection: SelectionEmails, current_user = Depends(get_current_user)):
+    envoyes = 0
+    echecs = 0
+    with engine.connect() as conn:
+        # Construction des paramètres nommés :id0, :id1, ...
+        placeholders = ','.join([f':id{i}' for i in range(len(selection.contact_ids))])
+        query = text(f"""
+            SELECT id, nom, email, telephone, secteur, ville, score
+            FROM prospects 
+            WHERE id IN ({placeholders}) AND email IS NOT NULL AND email != ''
+        """)
+        # Dictionnaire des paramètres
+        params = {f'id{i}': id for i, id in enumerate(selection.contact_ids)}
+        prospects = conn.execute(query, params).fetchall()
+
+        for row in prospects:
+            prospect = dict(row._mapping)
+            try:
+                contenu = generer_contenu_email(prospect)
+                sujet = f"Offre personnalisée pour {prospect['nom']}"
+                success = envoyer_email(prospect['email'], sujet, contenu, prospect['nom'])
+                if success:
+                    sauvegarder_email(None, prospect['id'], prospect['email'], sujet, contenu, 'envoyé')
+                    envoyes += 1
+                else:
+                    echecs += 1
+            except Exception as e:
+                print(f"Erreur pour {prospect['email']}: {e}")
+                echecs += 1
+
+    return {"envoyes": envoyes, "echecs": echecs}
 # ═══════════════════════════════════════════
 # EMAILS ✅ COMPLET AVEC MIGRATIONS
 # ═══════════════════════════════════════════
