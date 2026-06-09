@@ -18,7 +18,13 @@ from jwt import encode, decode
 import bcrypt
 from cryptography.fernet import Fernet
 import asyncio
+from pydantic import BaseModel
 
+class PostRequest(BaseModel):
+    plateforme: str
+    theme: str
+    langue: str = "français"
+    
 # Windows asyncio support
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -436,7 +442,24 @@ def create_prospect(prospect: Prospect, current_user = Depends(get_current_user)
     except Exception as e:
         print(f"❌ Erreur: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+@app.post("/social/posts/{post_id}/publish")
+def marquer_publie(post_id: int, current_user = Depends(get_current_user)):
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE posts_sociaux SET statut = 'publié' WHERE id = :id
+            """), {"id": post_id})
+            conn.commit()
 
+        return {
+            "success": True,
+            "message": f"Post {post_id} publié ✅"
+        }
+
+    except Exception as e:
+        print(f"Erreur marquer_publie: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.put("/prospects/{id}/statut")
 def update_statut(id: int, statut: str, current_user = Depends(get_current_user)):
     try:
@@ -1246,13 +1269,29 @@ def sauvegarder_email(body: EmailEnvoyeModel, current_user = Depends(get_current
 # ═══════════════════════════════════════════
 
 @app.post("/social/post/generer")
-def generer_post(plateforme: str, theme: str, langue: str = 'français', current_user = Depends(get_current_user)):
+def generer_post(body: PostRequest, current_user = Depends(get_current_user)):
     try:
-        return {"message": "Post généré ✅", "post": {"content": "Post example"}}
+        from social.social_service import generer_post_complet
+
+        post = generer_post_complet(
+            body.plateforme,
+            body.theme,
+            body.langue
+        )
+
+        return {
+            "success": True,
+            "message": "Post généré ✅",
+            "post": post,
+            "title": post.get("title", ""),
+            "content": post.get("content", ""),
+            "image": post.get("image", ""),
+            "platforms": post.get("platforms", [])
+        }
+
     except Exception as e:
         print(f"Erreur generer_post: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/social/calendrier/generer")
 def generer_calendrier(current_user = Depends(get_current_user)):
     try:
@@ -1272,7 +1311,14 @@ def get_posts(current_user = Depends(get_current_user)):
 @app.get("/social/posts/planifies")
 def get_posts_planifies(current_user = Depends(get_current_user)):
     try:
-        return []
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT * FROM posts_sociaux
+                WHERE statut = 'planifié'
+                AND date_publication <= NOW()
+                ORDER BY date_publication ASC
+            """))
+            return [dict(row._mapping) for row in result.fetchall()]
     except Exception as e:
         print(f"Erreur get_posts_planifies: {e}")
         return []

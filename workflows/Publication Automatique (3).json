@@ -1,0 +1,447 @@
+{
+  "name": "Publication Automatique",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -368,
+        -16
+      ],
+      "id": "f04e3cf9-1723-44f0-8877-ce9e9720e9a3",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/social/posts/planifies",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODExMTk5MDF9.cOMPkBvS9MFcW-tHprCBFxliPiQMpm3qMJxEDLELUlA"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -160,
+        -16
+      ],
+      "id": "55b16d93-70f7-42a6-bc69-a2eddbef5166",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4c98965d-f35b-4ca6-8eb1-24a1e8745bb6",
+              "leftValue": "={{ $json.body.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        -144
+      ],
+      "id": "39e371ac-c3e9-4fb8-ac34-f79ec8da7316",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        336,
+        -416
+      ],
+      "id": "5b2b52e5-eaea-4789-963e-7df03ef17f4e",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://127.0.0.1:8000/social/posts/{{ $json.posts.id }}/publier?plateforme={{ $json.posts.plateforme }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODExMTk5MDF9.cOMPkBvS9MFcW-tHprCBFxliPiQMpm3qMJxEDLELUlA"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "value": "{   \"post_id\": 1,   \"title\": \"Mon super post de test\",   \"content\": \"L'automatisation n8n fonctionne enfin !\",   \"image\": \"https://picsum.photos/200\",   \"platforms\": [\"Facebook\", \"Instagram\"] }"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        576,
+        64
+      ],
+      "id": "1d60a9aa-8a28-4e5b-9d6b-a724f5a8b2b6",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "53c6a423-626a-4562-86aa-63cfcbe9e0cb",
+                    "leftValue": "={{ $json.plateforme }}",
+                    "rightValue": "instagram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Instagram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "eb057a31-3d20-435d-a862-8bd61e0f420f",
+                    "leftValue": "={{ $json.plateforme }}",
+                    "rightValue": "facebook",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Facebook"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "326eff5b-2257-4796-a11a-6f992da7e5e8",
+                    "leftValue": "={{ $json.plateforme }}",
+                    "rightValue": "linkedin",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LinkedIn"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        528,
+        -256
+      ],
+      "id": "adfcb5c4-abed-4b5f-82c6-6962ac7dafbe",
+      "name": "Switch",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/17841407339350115/media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAXfN644VPoBRsgM6GFBfYDG5EbdRrZAzcyB482SJqQUPkV0RAG69ROZB0luhZAOjGi2af98DqOhpvCEX8MmNvS8iAv0QkUTZCB3lMRMZCbsLY67jQ8cbZAEifbCnSe2l6MNeNYbbepblZB8CXQsZA5w5XI9e0QO5o2SGaazljYZBNS2rwIaGk5DIh8Bs3XtM1aZAnKG838Hl7"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $json.image_url }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.contenu }} {{ $json.hashtags }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {}
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        768,
+        -480
+      ],
+      "id": "7aab0649-72f2-46ab-b4c1-541232927762",
+      "name": "HTTP Request2",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        976,
+        -32
+      ],
+      "id": "aa194b33-2db2-4602-8cf9-d9f055f9ce85",
+      "name": "HTTP Request4",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/{{17841407339350115}}/media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAXfN644VPoBRsgM6GFBfYDG5EbdRrZAzcyB482SJqQUPkV0RAG69ROZB0luhZAOjGi2af98DqOhpvCEX8MmNvS8iAv0QkUTZCB3lMRMZCbsLY67jQ8cbZAEifbCnSe2l6MNeNYbbepblZB8CXQsZA5w5XI9e0QO5o2SGaazljYZBNS2rwIaGk5DIh8Bs3XtM1aZAnKG838Hl7"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "value": "={    \n\"image_url\": \"{{ $json.image_url }}\",     \n\"caption\": \"{{ $json.contenu }} {{ $json.hashtags }}\"  \n} "
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        -288
+      ],
+      "id": "cbf95cf6-86c6-4d46-a0e3-7c84c1b63ac9",
+      "name": "HTTP Request3",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json.body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        48
+      ],
+      "id": "856fea3b-e026-4815-8e74-bb0a3111696e",
+      "name": "Edit Fields"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "174b0ca5-5a04-404f-a6dd-92ae842047ce",
+  "meta": {
+    "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
+  },
+  "nodeGroups": [],
+  "id": "sku9SpWSJphXS7Ff",
+  "tags": []
+}
