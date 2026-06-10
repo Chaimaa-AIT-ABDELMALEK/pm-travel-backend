@@ -183,8 +183,14 @@ def generer_sujet_email(prospect):
 # TEMPLATE HTML EMAIL
 # ─────────────────────────────────────────
 
-def construire_html_email(contenu, nom_prospect):
+def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
     contenu_html = contenu.replace('\n', '<br>')
+    pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" />'
+    
+    # URL de clic trackée
+    base_url = tracking_url.split('/tracking/open')[0]
+    tid = tracking_url.split('tid=')[1]
+    cta_url = f"{base_url}/tracking/click?tid={tid}"
 
     return f"""
     <!DOCTYPE html>
@@ -194,6 +200,7 @@ def construire_html_email(contenu, nom_prospect):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
     <body style="margin:0; padding:0; background-color:#f5f5f5; font-family: Arial, sans-serif;">
+        {pixel}
         <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
                 <td align="center" style="padding: 40px 0;">
@@ -221,6 +228,15 @@ def construire_html_email(contenu, nom_prospect):
                             </td>
                         </tr>
 
+                        <!-- BOUTON CTA TRACKÉ -->
+                        <tr>
+                            <td style="padding:20px 40px 30px; text-align:center;">
+                                <a href="{cta_url}"
+                                   style="display:inline-block; background:#1D9E75; color:#ffffff;
+                                          padding:14px 32px; border-radius:6px; font-size:15px;
+                                          font-weight:bold; text-decoration:none;">
+                                    Voir nos offres →
+                                </a> 
                         <!-- SIGNATURE -->
                         <tr>
                             <td style="padding:0 40px 30px;">
@@ -269,51 +285,46 @@ def construire_html_email(contenu, nom_prospect):
 # ENVOI EMAIL VIA SENDGRID
 # ─────────────────────────────────────────
 
-def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
-    html = construire_html_email(contenu_texte, nom_prospect)
+import uuid
+from urllib.parse import urlencode
 
+def envoyer_email_avec_tracking(conn, prospect, sujet, contenu_texte):
+    """Génère l'email avec pixel de tracking et l'envoie"""
+    # 1. Créer un tracking_id unique
+    tracking_id = str(uuid.uuid4())
+    
+    # 2. Construire l'URL de tracking
+    base_url = os.getenv('APP_BASE_URL', 'http://localhost:8000')
+    tracking_url = f"{base_url}/tracking/open?tid={tracking_id}"
+    
+    # 3. Générer le HTML avec le pixel
+    html = construire_html_email_avec_tracking(contenu_texte, prospect['nom'], tracking_url)
+    
+    # 4. Créer le message SendGrid
     message = Mail(
         from_email=os.getenv('SENDGRID_FROM_EMAIL'),
-        to_emails=destinataire,
+        to_emails=prospect['email'],
         subject=sujet,
         html_content=html
     )
-
+    
+    # 5. Envoyer
     try:
         response = sg_client.send(message)
-        status = response.status_code
-        print(f"🔍 SendGrid response status: {status}")
-        # Succès pour tous les codes 2xx
-        if 200 <= status < 300:
-            print(f"   ✅ Email envoyé à {destinataire}")
+        if 200 <= response.status_code < 300:
+            # 6. Sauvegarder dans la table avec tracking_id
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO emails_envoyes
+                    (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut, date_envoi, tracking_id)
+                    VALUES (%s, %s, %s, %s, %s, 'envoyé', NOW(), %s)
+                """, (None, prospect['id'], prospect['email'], sujet, contenu_texte, tracking_id))
+                conn.commit()
             return True
         else:
-            print(f"   ❌ Échec envoi à {destinataire} — code {status}")
             return False
     except Exception as e:
-        print(f"   ❌ Erreur SendGrid : {e}")
-        return False
-    html = construire_html_email(contenu_texte, nom_prospect)
-
-    message = Mail(
-        from_email=os.getenv('SENDGRID_FROM_EMAIL'),
-        to_emails=destinataire,
-        subject=sujet,
-        html_content=html
-    )
-
-    try:
-        response = sg_client.send(message)
-        status = response.status_code
-        # ✅ Succès pour tous les codes 2xx (200, 201, 202, etc.)
-        succes = 200 <= status < 300
-        if succes:
-            print(f"   ✅ Email envoyé à {destinataire} (status {status})")
-        else:
-            print(f"   ❌ Échec envoi à {destinataire} — code {status}")
-        return succes
-    except Exception as e:
-        print(f"   ❌ Erreur SendGrid : {e}")
+        print(f"Erreur envoi: {e}")
         return False
     
 # ─────────────────────────────────────────
@@ -440,5 +451,27 @@ def obtenir_tous_les_themes(plateforme):
             if result:
                 return json.loads(result[0])
             return list(THEMES_TOURISTIQUES.keys())
+    finally:
+        conn.close()
+        # Fonction d'envoi simple (sans tracking) pour rester compatible avec le code existant
+def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
+    """
+    Envoie un email simple (sans tracking) en créant une connexion temporaire.
+    Retourne True/False.
+    """
+    # Créer une connexion temporaire
+    conn = connect_db()
+    try:
+        # Créer un prospect factice avec les champs nécessaires
+        prospect = {
+            'id': 0,  # sera ignoré car l'insertion avec tracking_id n'utilise pas l'ID du prospect
+            'nom': nom_prospect,
+            'email': destinataire
+        }
+        # Utiliser votre fonction existante
+        return envoyer_email_avec_tracking(conn, prospect, sujet, contenu_texte)
+    except Exception as e:
+        print(f"Erreur envoyer_email: {e}")
+        return False
     finally:
         conn.close()

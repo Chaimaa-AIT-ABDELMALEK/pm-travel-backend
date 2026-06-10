@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Optional
 import os
+from pydantic import BaseModel
+from typing import Optional
+import requests
+import json
 from typing import List
 from pydantic import BaseModel
 from emails.email_service import generer_contenu_email, envoyer_email, sauvegarder_email
@@ -221,6 +225,49 @@ def init_database():
                     INDEX idx_date (date_execution)
                 )
             """))
+
+            # Table emails_recus (réponses des prospects)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS emails_recus (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT,
+                    email_expediteur VARCHAR(255) NOT NULL,
+                    nom_expediteur VARCHAR(255),
+                    sujet VARCHAR(500),
+                    contenu LONGTEXT,
+                    contenu_html LONGTEXT,
+                    message_id VARCHAR(500),
+                    in_reply_to VARCHAR(500),
+                    date_reception DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    lu BOOLEAN DEFAULT FALSE,
+                    INDEX idx_user (user_id),
+                    INDEX idx_expediteur (email_expediteur),
+                    INDEX idx_date (date_reception),
+                    UNIQUE KEY unique_message (message_id(255))
+                )
+            """))
+
+            # Ajouter colonne tracking_id à emails_envoyes si absente
+            try:
+                conn.execute(text("""
+                    ALTER TABLE emails_envoyes
+                    ADD COLUMN tracking_id VARCHAR(255) DEFAULT NULL
+                """))
+                print("✅ Colonne tracking_id ajoutée à emails_envoyes")
+            except Exception as e:
+                if "Duplicate column" not in str(e):
+                    pass
+
+            # Ajouter colonne prospect_id à emails_envoyes si absente
+            try:
+                conn.execute(text("""
+                    ALTER TABLE emails_envoyes
+                    ADD COLUMN prospect_id INT DEFAULT NULL
+                """))
+                print("✅ Colonne prospect_id ajoutée à emails_envoyes")
+            except Exception as e:
+                if "Duplicate column" not in str(e):
+                    pass
             
             conn.commit()
             print("✅ Tables initialisées avec succès")
@@ -1190,40 +1237,85 @@ def envoyer_emails_selection(selection: SelectionEmails, current_user = Depends(
     envoyes = 0
     echecs = 0
     with engine.connect() as conn:
-        # Construction des paramètres nommés :id0, :id1, ...
         placeholders = ','.join([f':id{i}' for i in range(len(selection.contact_ids))])
         query = text(f"""
             SELECT id, nom, email, telephone, secteur, ville, score
             FROM prospects 
             WHERE id IN ({placeholders}) AND email IS NOT NULL AND email != ''
         """)
-        # Dictionnaire des paramètres
         params = {f'id{i}': id for i, id in enumerate(selection.contact_ids)}
         prospects = conn.execute(query, params).fetchall()
 
         for row in prospects:
             prospect = dict(row._mapping)
+            if not prospect.get('email'):
+                print(f"⚠️ Prospect ID {prospect.get('id')} sans email, ignoré")
+                echecs += 1
+                continue
             try:
+                print(f"📝 Génération contenu pour {prospect['email']}")
                 contenu = generer_contenu_email(prospect)
                 sujet = f"Offre personnalisée pour {prospect['nom']}"
+                print(f"📤 Envoi à {prospect['email']}")
                 success = envoyer_email(prospect['email'], sujet, contenu, prospect['nom'])
                 if success:
-                    sauvegarder_email(None, prospect['id'], prospect['email'], sujet, contenu, 'envoyé')
+                    try:
+                        with engine.connect() as conn2:
+                            conn2.execute(text("""
+                                INSERT INTO emails_envoyes 
+                                (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut, date_envoi)
+                                VALUES (NULL, :prospect_id, :email, :sujet, :contenu, 'envoyé', NOW())
+                            """), {
+                                "prospect_id": prospect['id'],
+                                "email": prospect['email'],
+                                "sujet": sujet,
+                                "contenu": contenu
+                            })
+                            conn2.commit()
+                        print("   ✅ Email sauvegardé en base")
+                    except Exception as e:
+                        print(f"   ⚠️ Sauvegarde base échouée : {e}")
                     envoyes += 1
+                    print(f"   ✅ Succès, total = {envoyes}")
                 else:
                     echecs += 1
+                    print(f"   ❌ Échec, total = {echecs}")
+            except KeyError as e:
+                print(f"💥 Clé manquante : {e}")
+                echecs += 1
             except Exception as e:
-                print(f"Erreur pour {prospect['email']}: {e}")
+                print(f"💥 Exception : {e}")
                 echecs += 1
 
     return {"envoyes": envoyes, "echecs": echecs}
-# ═══════════════════════════════════════════
-# EMAILS ✅ COMPLET AVEC MIGRATIONS
-# ═══════════════════════════════════════════
+
+@app.post("/emails/sauvegarder")
+def sauvegarder_email_endpoint(email_data: EmailEnvoyeModel, current_user = Depends(get_current_user)):
+    """Sauvegarde manuellement un email dans la table emails_envoyes"""
+    user_id = current_user.get('user_id')
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO emails_envoyes
+                (user_id, campagne_id, email_destinataire, sujet, contenu, statut, date_envoi)
+                VALUES (:user_id, :campagne_id, :email, :sujet, :contenu, :statut, NOW())
+            """), {
+                "user_id": user_id,
+                "campagne_id": email_data.campagne_id,
+                "email": email_data.email_destinataire,
+                "sujet": email_data.sujet,
+                "contenu": email_data.contenu,
+                "statut": email_data.statut
+            })
+            conn.commit()
+        return {"message": "✅ Email sauvegardé"}
+    except Exception as e:
+        print(f"Erreur sauvegarder_email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/emails/envoyes")
 def get_emails_envoyes(current_user = Depends(get_current_user)):
-    """Récupère les emails envoyés"""
     try:
         user_id = current_user.get('user_id')
         with engine.connect() as conn:
@@ -1235,145 +1327,54 @@ def get_emails_envoyes(current_user = Depends(get_current_user)):
                 ORDER BY e.date_envoi DESC
                 LIMIT 100
             """), {"user_id": user_id})
-            return [dict(row._mapping) for row in result.fetchall()]
+            emails = []
+            for row in result.fetchall():
+                d = dict(row._mapping)
+                if d.get('date_envoi'): d['date_envoi'] = str(d['date_envoi'])
+                if d.get('date_ouverture'): d['date_ouverture'] = str(d['date_ouverture'])
+                emails.append(d)
+            return emails
     except Exception as e:
-        print(f"Erreur /emails/envoyes: {e}")
+        print(f"❌ /emails/envoyes: {e}")
         return []
-
-@app.post("/emails/sauvegarder")
-def sauvegarder_email(body: EmailEnvoyeModel, current_user = Depends(get_current_user)):
-    """Sauvegarde un email envoyé"""
+@app.get("/tracking/click")
+def track_click(tid: str):
+    """Tracking par clic — fonctionne même si Gmail bloque les images"""
     try:
-        user_id = current_user.get('user_id')
         with engine.connect() as conn:
             conn.execute(text("""
-                INSERT INTO emails_envoyes
-                (user_id, campagne_id, email_destinataire, sujet, contenu, statut, date_envoi)
-                VALUES (:user_id, :campagne_id, :email_destinataire, :sujet, :contenu, :statut, NOW())
-            """), {
-                "user_id": user_id,
-                "campagne_id": body.campagne_id,
-                "email_destinataire": body.email_destinataire,
-                "sujet": body.sujet,
-                "contenu": body.contenu,
-                "statut": body.statut
-            })
+                UPDATE emails_envoyes 
+                SET statut = 'ouvert',
+                    date_ouverture = COALESCE(date_ouverture, NOW())
+                WHERE tracking_id = :tid
+            """), {"tid": tid})
             conn.commit()
-        return {"message": "✅ Email enregistré!", "success": True}
     except Exception as e:
-        print(f"❌ Erreur enregistrement email: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ═══════════════════════════════════════════
-# SOCIAL
-# ═══════════════════════════════════════════
-
-@app.post("/social/post/generer")
-def generer_post(body: PostRequest, current_user = Depends(get_current_user)):
-    try:
-        from social.social_service import generer_post_complet
-
-        post = generer_post_complet(
-            body.plateforme,
-            body.theme,
-            body.langue
-        )
-
-        return {
-            "success": True,
-            "message": "Post généré ✅",
-            "post": post,
-            "title": post.get("title", ""),
-            "content": post.get("content", ""),
-            "image": post.get("image", ""),
-            "platforms": post.get("platforms", [])
-        }
-
-    except Exception as e:
-        print(f"Erreur generer_post: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-@app.post("/social/calendrier/generer")
-def generer_calendrier(current_user = Depends(get_current_user)):
-    try:
-        return {"message": "Calendrier généré ✅", "total_posts": 0, "posts": []}
-    except Exception as e:
-        print(f"Erreur generer_calendrier: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/social/posts")
-def get_posts(current_user = Depends(get_current_user)):
-    try:
-        return []
-    except Exception as e:
-        print(f"Erreur get_posts: {e}")
-        return []
-
-@app.get("/social/posts/planifies")
-def get_posts_planifies(current_user = Depends(get_current_user)):
+        print(f"Tracking click error: {e}")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://www.pmtravel.ma")
+@app.get("/tracking/open")
+def track_open(tid: str):
+    """Pixel de tracking - enregistre l'ouverture"""
     try:
         with engine.connect() as conn:
-            result = conn.execute(text("""
-                SELECT * FROM posts_sociaux
-                WHERE statut = 'planifié'
-                AND date_publication <= NOW()
-                ORDER BY date_publication ASC
-            """))
-            return [dict(row._mapping) for row in result.fetchall()]
-    except Exception as e:
-        print(f"Erreur get_posts_planifies: {e}")
-        return []
-
-@app.get("/social/themes")
-def get_themes(current_user = Depends(get_current_user)):
-    try:
-        return {"themes": [], "details": {}}
-    except Exception as e:
-        print(f"Erreur get_themes: {e}")
-        return {"themes": [], "details": {}}
-
-@app.put("/social/posts/{post_id}/statut")
-def update_statut_post(post_id: int, statut: str, current_user = Depends(get_current_user)):
-    try:
-        return {"message": "Statut mis à jour ✅"}
-    except Exception as e:
-        print(f"Erreur update_statut_post: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ═══════════════════════════════════════════
-# SETTINGS
-# ═══════════════════════════════════════════
-
-@app.post("/settings/api")
-def save_api_config(body: APIConfigRequest, current_user = Depends(get_current_user)):
-    """Sauvegarde la configuration d'une API"""
-    try:
-        api_name = body.api_name
-        config = body.config
-        user_id = current_user.get('user_id')
-        
-        encrypted_key = CIPHER_SUITE.encrypt(
-            config.get('api_key', '').encode()
-        ).decode()
-        
-        with engine.connect() as conn:
-            conn.execute(text("""
-                INSERT INTO api_integrations 
-                (user_id, api_name, api_key, config, enabled)
-                VALUES (:user_id, :api_name, :api_key, :config, :enabled)
-                ON DUPLICATE KEY UPDATE
-                api_key = VALUES(api_key), config = VALUES(config), enabled = VALUES(enabled)
-            """), {
-                "user_id": user_id,
-                "api_name": api_name,
-                "api_key": encrypted_key,
-                "config": json.dumps(config),
-                "enabled": config.get('enabled', False)
-            })
+            conn.execute(
+                text("""
+                    UPDATE emails_envoyes 
+                    SET date_ouverture = NOW(),
+                        statut = 'ouvert'
+                    WHERE tracking_id = :tid 
+                    AND date_ouverture IS NULL
+                """),
+                {"tid": tid}
+            )
             conn.commit()
-        return {"message": f"✅ {api_name} sauvegardé!"}
+
     except Exception as e:
-        print(f"❌ Erreur API config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Tracking error: {e}")
+    from fastapi.responses import Response
+    pixel = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+    return Response(content=pixel, media_type="image/gif")
 
 @app.get("/settings/api/list")
 def get_api_configs(current_user = Depends(get_current_user)):
@@ -1386,12 +1387,12 @@ def get_api_configs(current_user = Depends(get_current_user)):
                 FROM api_integrations
                 WHERE user_id = :user_id
             """), {"user_id": user_id})
-            
+
             apis = {}
             for row in result.fetchall():
                 r = dict(row._mapping)
                 apis[r['api_name']] = r['enabled'] == 1
-            
+
             return {
                 "google_places": apis.get('google_places', False),
                 "openai": apis.get('openai', False)
@@ -1399,7 +1400,7 @@ def get_api_configs(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"Erreur /settings/api/list: {e}")
         return {"google_places": False, "openai": False}
-
+    
 @app.post("/settings/smtp")
 def save_smtp_config(config: SMTPConfig, current_user = Depends(get_current_user)):
     """Sauvegarde la configuration SMTP"""
@@ -1470,11 +1471,441 @@ def save_imap_config(config: IMAPConfig, current_user = Depends(get_current_user
 
 @app.post("/settings/imap/sync")
 def sync_emails(current_user = Depends(get_current_user)):
-    """Synchronise les emails"""
+    """Synchronise les emails reçus via IMAP et les stocke dans emails_recus"""
+    user_id = current_user.get('user_id')
     try:
-        return {"message": "✅ Emails synchronisés", "count": 0}
+        # Récupérer la config IMAP
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT email, password, host, port, secure
+                FROM email_settings
+                WHERE user_id = :user_id AND imap_enabled = 1
+                LIMIT 1
+            """), {"user_id": user_id})
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="IMAP non configuré. Configurez-le dans Settings.")
+            cfg = dict(row._mapping)
+
+        # Décrypter le mot de passe
+        try:
+            password = CIPHER_SUITE.decrypt(cfg['password'].encode()).decode()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Erreur décryption mot de passe IMAP.")
+
+        import imaplib
+        import email as email_lib
+        from email.header import decode_header
+
+        def decode_str(s):
+            if s is None:
+                return ''
+            parts = decode_header(s)
+            result = []
+            for part, enc in parts:
+                if isinstance(part, bytes):
+                    result.append(part.decode(enc or 'utf-8', errors='replace'))
+                else:
+                    result.append(part)
+            return ' '.join(result)
+
+        def get_body(msg):
+            """Extrait le corps texte et HTML du message"""
+            text_body, html_body = '', ''
+            if msg.is_multipart():
+                for part in msg.walk():
+                    ct = part.get_content_type()
+                    disp = str(part.get('Content-Disposition') or '')
+                    if 'attachment' in disp:
+                        continue
+                    try:
+                        payload = part.get_payload(decode=True)
+                        if payload is None:
+                            continue
+                        charset = part.get_content_charset() or 'utf-8'
+                        decoded = payload.decode(charset, errors='replace')
+                        if ct == 'text/plain' and not text_body:
+                            text_body = decoded
+                        elif ct == 'text/html' and not html_body:
+                            html_body = decoded
+                    except Exception:
+                        pass
+            else:
+                try:
+                    payload = msg.get_payload(decode=True)
+                    charset = msg.get_content_charset() or 'utf-8'
+                    decoded = payload.decode(charset, errors='replace') if payload else ''
+                    if msg.get_content_type() == 'text/html':
+                        html_body = decoded
+                    else:
+                        text_body = decoded
+                except Exception:
+                    pass
+            return text_body, html_body
+
+        # Connexion IMAP
+        host = cfg['host'] or 'imap.gmail.com'
+        port = cfg['port'] or 993
+        secure = cfg['secure']
+        imap_email = cfg['email']
+
+        if secure:
+            imap = imaplib.IMAP4_SSL(host, port)
+        else:
+            imap = imaplib.IMAP4(host, port)
+
+        imap.login(imap_email, password)
+
+        # Dossiers à scanner : INBOX + Spam (noms possibles selon le provider)
+        from datetime import date, timedelta
+        since_date = (date.today() - timedelta(days=30)).strftime('%d-%b-%Y')
+
+        # Lister tous les dossiers disponibles pour trouver le bon nom Spam
+        _, folder_list = imap.list()
+        available_folders = []
+        for f in folder_list:
+            try:
+                decoded = f.decode() if isinstance(f, bytes) else f
+                # Extraire le nom du dossier (dernier élément après le séparateur)
+                parts = decoded.split('"/"')
+                folder_name = parts[-1].strip().strip('"') if len(parts) > 1 else decoded.split()[-1].strip('"')
+                available_folders.append(folder_name)
+            except Exception:
+                pass
+
+        # Noms possibles pour le dossier Spam selon Gmail / Outlook / Yahoo
+        spam_candidates = [
+            '[Gmail]/Spam', '[Gmail]/Junk', 'Spam', 'Junk', 'Junk Email',
+            '[Google Mail]/Spam', 'INBOX.Spam', 'INBOX.Junk'
+        ]
+        folders_to_scan = ['INBOX']
+        for candidate in spam_candidates:
+            if any(candidate.lower() in f.lower() for f in available_folders):
+                folders_to_scan.append(candidate)
+                break
+
+        import re
+        from email.utils import parsedate_to_datetime
+
+        count_new = 0
+
+        with engine.connect() as conn:
+            for folder in folders_to_scan:
+                try:
+                    status_sel, _ = imap.select(folder, readonly=True)
+                    if status_sel != 'OK':
+                        print(f"⚠️ Dossier inaccessible: {folder}")
+                        continue
+
+                    status, messages = imap.search(None, f'SINCE {since_date}')
+                    if status != 'OK' or not messages[0]:
+                        continue
+
+                    msg_ids = messages[0].split()
+                    print(f"📂 {folder} : {len(msg_ids)} emails trouvés")
+
+                    for num in msg_ids[-100:]:  # Max 100 par dossier
+                        try:
+                            status, data = imap.fetch(num, '(RFC822)')
+                            if status != 'OK':
+                                continue
+                            raw = data[0][1]
+                            msg = email_lib.message_from_bytes(raw)
+
+                            message_id = msg.get('Message-ID', '').strip()
+                            if not message_id:
+                                continue
+
+                            # Vérifier si déjà importé
+                            exists = conn.execute(text("""
+                                SELECT 1 FROM emails_recus WHERE message_id = :mid LIMIT 1
+                            """), {"mid": message_id[:255]}).fetchone()
+                            if exists:
+                                continue
+
+                            # Parser l'expéditeur
+                            from_raw = decode_str(msg.get('From', ''))
+                            match = re.search(r'<(.+?)>', from_raw)
+                            expediteur_email = match.group(1) if match else from_raw.strip()
+                            nom_expediteur = re.sub(r'<.+>', '', from_raw).strip().strip('"')
+
+                            # Ne garder que les réponses de prospects (pas ses propres emails)
+                            if expediteur_email.lower() == imap_email.lower():
+                                continue
+
+                            sujet = decode_str(msg.get('Subject', ''))
+                            in_reply_to = msg.get('In-Reply-To', '').strip()
+                            text_body, html_body = get_body(msg)
+
+                            # Date de réception
+                            try:
+                                date_rec = parsedate_to_datetime(msg.get('Date', ''))
+                            except Exception:
+                                date_rec = datetime.now()
+
+                            conn.execute(text("""
+                                INSERT IGNORE INTO emails_recus
+                                (user_id, email_expediteur, nom_expediteur, sujet, contenu, contenu_html,
+                                 message_id, in_reply_to, date_reception, lu)
+                                VALUES (:user_id, :exp, :nom, :sujet, :contenu, :html,
+                                        :mid, :irt, :date_rec, 0)
+                            """), {
+                                "user_id": user_id,
+                                "exp": expediteur_email[:255],
+                                "nom": nom_expediteur[:255],
+                                "sujet": sujet[:500],
+                                "contenu": text_body[:65000],
+                                "html": html_body[:65000],
+                                "mid": message_id[:255],
+                                "irt": in_reply_to[:500] if in_reply_to else None,
+                                "date_rec": date_rec
+                            })
+                            count_new += 1
+                        except Exception as e:
+                            print(f"Erreur parsing email: {e}")
+                            continue
+
+                    conn.commit()
+
+                except Exception as e:
+                    print(f"Erreur scan dossier {folder}: {e}")
+                    continue
+
+        imap.logout()
+
+        # Marquer comme 'répondu' uniquement le dernier email envoyé à chaque
+        # adresse qui a effectivement répondu — pas tous les emails de l'historique.
+        with engine.connect() as conn:
+            conn.execute(text("""
+    UPDATE emails_envoyes ee
+    JOIN (
+        SELECT DISTINCT ee2.id
+        FROM emails_envoyes ee2
+        JOIN (
+            SELECT LOWER(email_expediteur) AS exp_email
+            FROM emails_recus
+            WHERE user_id = :uid
+        ) er ON LOWER(ee2.email_destinataire) = er.exp_email
+        WHERE (ee2.user_id = :uid OR ee2.user_id IS NULL)
+          AND ee2.id = (
+              SELECT MAX(ee3.id)
+              FROM emails_envoyes ee3
+              WHERE LOWER(ee3.email_destinataire) = LOWER(ee2.email_destinataire)
+                AND (ee3.user_id = :uid OR ee3.user_id IS NULL)
+          )
+    ) AS ids_a_mettre_a_jour ON ee.id = ids_a_mettre_a_jour.id
+    SET ee.statut = 'répondu'
+    WHERE ee.statut NOT IN ('répondu', 'cliqué')
+"""), {"uid": user_id})
+            conn.commit()
+
+        return {"message": f"✅ {count_new} nouveaux emails importés", "count": count_new}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Erreur sync emails: {e}")
+        print(f"Erreur sync IMAP: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur IMAP: {str(e)}")
+
+
+@app.get("/emails/recus")
+def get_emails_recus(current_user = Depends(get_current_user)):
+    """Retourne tous les emails reçus (réponses des prospects)"""
+    user_id = current_user.get('user_id')
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT * FROM emails_recus
+                WHERE user_id = :user_id
+                ORDER BY date_reception DESC
+                LIMIT 200
+            """), {"user_id": user_id})
+            emails = []
+            for row in result.fetchall():
+                d = dict(row._mapping)
+                if d.get('date_reception'):
+                    d['date_reception'] = str(d['date_reception'])
+                emails.append(d)
+            return emails
+    except Exception as e:
+        print(f"Erreur /emails/recus: {e}")
+        return []
+
+
+@app.get("/emails/conversations")
+def get_conversations(current_user = Depends(get_current_user)):
+    """
+    Retourne l'historique complet des échanges groupés par adresse email.
+    Chaque entrée contient : email, nom, nb_envoyes, nb_recus, dernier_message,
+    et la liste des messages (envoyés + reçus) triés par date.
+    """
+    user_id = current_user.get('user_id')
+    try:
+        with engine.connect() as conn:
+            # Emails envoyés
+            sent = conn.execute(text("""
+                SELECT 
+                    e.id, e.email_destinataire AS email_contact,
+                    e.sujet, e.contenu, e.statut, e.date_envoi AS date_msg,
+                    'envoyé' AS direction,
+                    c.nom AS campagne_nom,
+                    e.tracking_id
+                FROM emails_envoyes e
+                LEFT JOIN campagnes c ON e.campagne_id = c.id
+                WHERE e.user_id = :uid OR e.user_id IS NULL
+                ORDER BY e.date_envoi DESC
+                LIMIT 500
+            """), {"uid": user_id}).fetchall()
+
+            # Emails reçus
+            received = conn.execute(text("""
+                SELECT
+                    id, email_expediteur AS email_contact,
+                    nom_expediteur AS nom_contact,
+                    sujet, contenu, 'reçu' AS statut,
+                    date_reception AS date_msg,
+                    'reçu' AS direction,
+                    lu
+                FROM emails_recus
+                WHERE user_id = :uid
+                ORDER BY date_reception DESC
+                LIMIT 500
+            """), {"uid": user_id}).fetchall()
+
+        # Regrouper par email_contact
+        conversations = {}
+
+        for row in sent:
+            d = dict(row._mapping)
+            email = (d.get('email_contact') or '').lower().strip()
+            if not email:
+                continue
+            if email not in conversations:
+                conversations[email] = {
+                    'email': email,
+                    'nom': email,
+                    'messages': [],
+                    'nb_envoyes': 0,
+                    'nb_recus': 0,
+                    'dernier_message': None,
+                    'a_repondu': False
+                }
+            d['date_msg'] = str(d['date_msg']) if d.get('date_msg') else None
+            conversations[email]['messages'].append(d)
+            conversations[email]['nb_envoyes'] += 1
+
+        for row in received:
+            d = dict(row._mapping)
+            email = (d.get('email_contact') or '').lower().strip()
+            if not email:
+                continue
+            if email not in conversations:
+                conversations[email] = {
+                    'email': email,
+                    'nom': d.get('nom_contact') or email,
+                    'messages': [],
+                    'nb_envoyes': 0,
+                    'nb_recus': 0,
+                    'dernier_message': None,
+                    'a_repondu': False
+                }
+            if d.get('nom_contact'):
+                conversations[email]['nom'] = d['nom_contact']
+            d['date_msg'] = str(d['date_msg']) if d.get('date_msg') else None
+            conversations[email]['messages'].append(d)
+            conversations[email]['nb_recus'] += 1
+            conversations[email]['a_repondu'] = True
+
+        # Trier les messages dans chaque conversation + calculer dernier_message
+        result_list = []
+        for email, conv in conversations.items():
+            conv['messages'].sort(key=lambda x: x.get('date_msg') or '', reverse=False)
+            dates = [m.get('date_msg') for m in conv['messages'] if m.get('date_msg')]
+            conv['dernier_message'] = max(dates) if dates else None
+            result_list.append(conv)
+
+        # Trier les conversations par dernier_message desc
+        result_list.sort(key=lambda x: x.get('dernier_message') or '', reverse=True)
+        return result_list
+
+    except Exception as e:
+        print(f"Erreur /emails/conversations: {e}")
+        return []
+
+
+@app.post("/emails/corriger-statuts")
+def corriger_statuts_emails(current_user = Depends(get_current_user)):
+    """
+    Remet à 'ouvert' ou 'envoyé' les emails qui ont été marqués 'répondu' à tort
+    (tous les emails d'une adresse au lieu du dernier uniquement).
+    Conserve uniquement le dernier email envoyé à chaque adresse comme 'répondu'.
+    """
+    user_id = current_user.get('user_id')
+    try:
+        with engine.connect() as conn:
+            # 1. Récupérer les adresses qui ont vraiment répondu
+            replied_addresses = conn.execute(text("""
+                SELECT DISTINCT LOWER(email_expediteur) as email
+                FROM emails_recus WHERE user_id = :uid
+            """), {"uid": user_id}).fetchall()
+            replied_set = {r[0] for r in replied_addresses}
+
+            if not replied_set:
+                # Personne n'a répondu : remettre tous les 'répondu' à leur vrai statut
+                conn.execute(text("""
+    UPDATE emails_envoyes
+    SET statut = CASE
+        WHEN date_ouverture IS NOT NULL THEN 'ouvert'
+        ELSE 'envoyé'
+    END
+    WHERE statut = 'répondu'
+    AND (user_id = :uid OR user_id IS NULL)
+"""), {"uid": user_id})
+            else:
+                placeholders = ','.join([f':e{i}' for i in range(len(replied_set))])
+                params = {f'e{i}': e for i, e in enumerate(replied_set)}
+                params['uid'] = user_id
+
+                # 2. Pour chaque adresse ayant répondu, trouver le MAX(id) = dernier email envoyé
+                # Tous les autres emails envoyés à cette adresse reprennent leur vrai statut
+                conn.execute(text(f"""
+                    UPDATE emails_envoyes ee
+                    SET ee.statut = CASE
+                        WHEN ee.date_ouverture IS NOT NULL THEN 'ouvert'
+                        ELSE 'envoyé'
+                    END
+                    WHERE ee.statut = 'répondu'
+                    AND (ee.user_id = :uid OR ee.user_id IS NULL)
+                    AND LOWER(ee.email_destinataire) IN ({placeholders})
+                    AND ee.id != (
+                        SELECT max_id FROM (
+                            SELECT MAX(id) as max_id FROM emails_envoyes
+                            WHERE LOWER(email_destinataire) = LOWER(ee.email_destinataire)
+                            AND (user_id = :uid OR user_id IS NULL)
+                        ) sub
+                    )
+                """), params)
+
+            conn.commit()
+        return {"message": "✅ Statuts corrigés"}
+    except Exception as e:
+        print(f"Erreur corriger_statuts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/emails/recus/{email_id}/lu")
+def marquer_lu(email_id: int, current_user = Depends(get_current_user)):
+    """Marque un email reçu comme lu"""
+    user_id = current_user.get('user_id')
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE emails_recus SET lu = 1
+                WHERE id = :id AND user_id = :uid
+            """), {"id": email_id, "uid": user_id})
+            conn.commit()
+        return {"message": "✅ Marqué comme lu"}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # ═══════════════════════════════════════════
@@ -1496,6 +1927,148 @@ def get_sequences(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"Erreur get_sequences: {e}")
         return []
+class PublishRequest(BaseModel):
+    plateforme: str  # instagram, facebook, linkedin
+
+@app.post("/social/posts/{post_id}/publier")
+def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_current_user)):
+    """
+    Publie réellement un post sur la plateforme demandée.
+    Utilise les tokens stockés dans api_integrations.
+    """
+    try:
+        # 1. Récupérer le post depuis la base
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT * FROM posts_sociaux WHERE id = :post_id
+            """), {"post_id": post_id})
+            post = result.fetchone()
+            if not post:
+                raise HTTPException(status_code=404, detail="Post non trouvé")
+            post_dict = dict(post._mapping)
+        
+        if post_dict['statut'] != 'planifié':
+            raise HTTPException(status_code=400, detail="Post déjà publié ou non planifié")
+        
+        # 2. Récupérer le token d'accès pour la plateforme
+        platform = req.plateforme.lower()
+        token = None
+        with engine.connect() as conn:
+            res = conn.execute(text("""
+                SELECT api_key FROM api_integrations
+                WHERE api_name = :api_name AND enabled = 1
+            """), {"api_name": f"social_{platform}"})
+            row = res.fetchone()
+            if row:
+                encrypted = row[0]
+                decrypted = CIPHER_SUITE.decrypt(encrypted.encode()).decode()
+                token = decrypted
+        
+        if not token:
+            raise HTTPException(status_code=400, detail=f"Token non configuré pour {platform}")
+        
+        # 3. Publier selon la plateforme
+        contenu = post_dict['contenu']
+        hashtags = json.loads(post_dict['hashtags']) if post_dict['hashtags'] else []
+        full_caption = f"{contenu} {' '.join(hashtags)}"
+        image_url = post_dict['image_url']
+        
+        if platform == "instagram":
+            # Utiliser l'API Instagram Graph (compte business)
+            # Récupérer l'ID du compte Instagram depuis la config
+            with engine.connect() as conn:
+                cfg = conn.execute(text("""
+                    SELECT config FROM api_integrations WHERE api_name = 'instagram_business'
+                """)).fetchone()
+                if not cfg:
+                    raise HTTPException(400, "Configuration Instagram manquante")
+                config_insta = json.loads(cfg[0])
+                ig_account_id = config_insta.get("account_id")
+            
+            # Étape 1 : créer le conteneur média
+            media_url = f"https://graph.facebook.com/v18.0/{ig_account_id}/media"
+            media_resp = requests.post(media_url, data={
+                "image_url": image_url,
+                "caption": full_caption,
+                "access_token": token
+            })
+            if media_resp.status_code != 200:
+                raise Exception(f"Erreur création média: {media_resp.text}")
+            media_id = media_resp.json().get("id")
+            
+            # Étape 2 : publier
+            publish_url = f"https://graph.facebook.com/v18.0/{ig_account_id}/media_publish"
+            pub_resp = requests.post(publish_url, data={
+                "creation_id": media_id,
+                "access_token": token
+            })
+            if pub_resp.status_code != 200:
+                raise Exception(f"Erreur publication: {pub_resp.text}")
+        
+        elif platform == "facebook":
+            # Récupérer l'ID de la page
+            with engine.connect() as conn:
+                cfg = conn.execute(text("""
+                    SELECT config FROM api_integrations WHERE api_name = 'facebook_page'
+                """)).fetchone()
+                if not cfg:
+                    raise HTTPException(400, "Configuration Facebook manquante")
+                page_id = json.loads(cfg[0]).get("page_id")
+            
+            fb_url = f"https://graph.facebook.com/v18.0/{page_id}/feed"
+            fb_resp = requests.post(fb_url, data={
+                "message": full_caption,
+                "link": image_url,  # ou attached_media[] si image seule
+                "access_token": token
+            })
+            if fb_resp.status_code != 200:
+                raise Exception(f"Erreur Facebook: {fb_resp.text}")
+        
+        elif platform == "linkedin":
+            # API LinkedIn (nécessite un access token OAuth2)
+            linkedin_url = "https://api.linkedin.com/v2/ugcPosts"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            # Exemple de payload pour une image
+            payload = {
+                "author": f"urn:li:person:{os.getenv('LINKEDIN_PERSON_ID')}",
+                "lifecycleState": "PUBLISHED",
+                "specificContent": {
+                    "com.linkedin.ugc.ShareContent": {
+                        "shareCommentary": {"text": full_caption},
+                        "shareMediaCategory": "IMAGE",
+                        "media": [{"status": "READY", "originalUrl": image_url}]
+                    }
+                },
+                "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}
+            }
+            li_resp = requests.post(linkedin_url, json=payload, headers=headers)
+            if li_resp.status_code != 201:
+                raise Exception(f"Erreur LinkedIn: {li_resp.text}")
+        else:
+            raise HTTPException(400, f"Plateforme {platform} non supportée")
+        
+        # 4. Marquer le post comme publié dans la base
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE posts_sociaux SET statut = 'publié' WHERE id = :post_id
+            """), {"post_id": post_id})
+            conn.execute(text("""
+                UPDATE calendrier_editorial SET statut = 'publié' WHERE post_id = :post_id
+            """), {"post_id": post_id})
+            conn.commit()
+        
+        return {
+            "success": True,
+            "message": f"Post {post_id} publié sur {platform}",
+            "post_id": post_id
+        }
+    
+    except Exception as e:
+        print(f"Erreur publier_post: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ═══════════════════════════════════════════
 # START

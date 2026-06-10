@@ -62,7 +62,7 @@
           "conditions": [
             {
               "id": "4c98965d-f35b-4ca6-8eb1-24a1e8745bb6",
-              "leftValue": "={{ $json.body.length }}",
+              "leftValue": "={{ $json.length }}",
               "rightValue": 0,
               "operator": {
                 "type": "number",
@@ -313,22 +313,8 @@
       "id": "cbf95cf6-86c6-4d46-a0e3-7c84c1b63ac9",
       "name": "HTTP Request3",
       "disabled": true
-    },
-    {
-      "parameters": {
-        "mode": "raw",
-        "jsonOutput": "={{ $json.body }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        96,
-        48
-      ],
-      "id": "856fea3b-e026-4815-8e74-bb0a3111696e",
-      "name": "Edit Fields"
     }
+    
   ],
   "pinData": {},
   "connections": {
