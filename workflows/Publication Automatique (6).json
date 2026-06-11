@@ -28,7 +28,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODExMTk5MDF9.cOMPkBvS9MFcW-tHprCBFxliPiQMpm3qMJxEDLELUlA"
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODEyOTAyMTV9.m29svmujSw19-GDj1k-iGTtBhVAwjnh7W3pABGbevAA"
             }
           ]
         },
@@ -62,11 +62,11 @@
           "conditions": [
             {
               "id": "4c98965d-f35b-4ca6-8eb1-24a1e8745bb6",
-              "leftValue": "={{ $json.length }}",
+              "leftValue": "={{ $json.body.length }}",
               "rightValue": 0,
               "operator": {
                 "type": "number",
-                "operation": "equals"
+                "operation": "gt"
               }
             }
           ],
@@ -90,8 +90,8 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        336,
-        -416
+        352,
+        -368
       ],
       "id": "5b2b52e5-eaea-4789-963e-7df03ef17f4e",
       "name": "Loop Over Items"
@@ -99,13 +99,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://127.0.0.1:8000/social/posts/{{ $json.posts.id }}/publier?plateforme={{ $json.posts.plateforme }}",
+        "url": "=http://127.0.0.1:8000/social/posts/{{$json.id}}/publier",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODExMTk5MDF9.cOMPkBvS9MFcW-tHprCBFxliPiQMpm3qMJxEDLELUlA"
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODEyOTAyMTV9.m29svmujSw19-GDj1k-iGTtBhVAwjnh7W3pABGbevAA"
             }
           ]
         },
@@ -113,7 +113,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "value": "{   \"post_id\": 1,   \"title\": \"Mon super post de test\",   \"content\": \"L'automatisation n8n fonctionne enfin !\",   \"image\": \"https://picsum.photos/200\",   \"platforms\": [\"Facebook\", \"Instagram\"] }"
+              "name": "plateforme",
+              "value": "={{ $json.plateforme }}"
             }
           ]
         },
@@ -223,46 +224,6 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://graph.facebook.com/v18.0/17841407339350115/media",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bearer EAAXfN644VPoBRsgM6GFBfYDG5EbdRrZAzcyB482SJqQUPkV0RAG69ROZB0luhZAOjGi2af98DqOhpvCEX8MmNvS8iAv0QkUTZCB3lMRMZCbsLY67jQ8cbZAEifbCnSe2l6MNeNYbbepblZB8CXQsZA5w5XI9e0QO5o2SGaazljYZBNS2rwIaGk5DIh8Bs3XtM1aZAnKG838Hl7"
-            }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "image_url",
-              "value": "={{ $json.image_url }}"
-            },
-            {
-              "name": "caption",
-              "value": "={{ $json.contenu }} {{ $json.hashtags }}"
-            }
-          ]
-        },
-        "options": {
-          "response": {}
-        }
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        768,
-        -480
-      ],
-      "id": "7aab0649-72f2-46ab-b4c1-541232927762",
-      "name": "HTTP Request2",
-      "disabled": true
-    },
-    {
-      "parameters": {
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -313,8 +274,59 @@
       "id": "cbf95cf6-86c6-4d46-a0e3-7c84c1b63ac9",
       "name": "HTTP Request3",
       "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/17841407339350115/media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAXfN644VPoBRsgM6GFBfYDG5EbdRrZAzcyB482SJqQUPkV0RAG69ROZB0luhZAOjGi2af98DqOhpvCEX8MmNvS8iAv0QkUTZCB3lMRMZCbsLY67jQ8cbZAEifbCnSe2l6MNeNYbbepblZB8CXQsZA5w5XI9e0QO5o2SGaazljYZBNS2rwIaGk5DIh8Bs3XtM1aZAnKG838Hl7"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $json.image_url }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.contenu }} {{ $json.hashtags }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {}
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        768,
+        -480
+      ],
+      "id": "7aab0649-72f2-46ab-b4c1-541232927762",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $json.body;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -96
+      ],
+      "id": "6cc06bf7-7b08-41a9-ab4e-1c6dde2e6b35",
+      "name": "Code in JavaScript"
     }
-    
   ],
   "pinData": {},
   "connections": {
@@ -342,14 +354,14 @@
     },
     "If": {
       "main": [
-        [],
         [
           {
-            "node": "Edit Fields",
+            "node": "Code in JavaScript",
             "type": "main",
             "index": 0
           }
-        ]
+        ],
+        []
       ]
     },
     "Loop Over Items": {
@@ -406,7 +418,7 @@
         ]
       ]
     },
-    "Edit Fields": {
+    "Code in JavaScript": {
       "main": [
         [
           {
@@ -416,6 +428,11 @@
           }
         ]
       ]
+    },
+    "HTTP Request2": {
+      "main": [
+        []
+      ]
     }
   },
   "active": false,
@@ -423,7 +440,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "174b0ca5-5a04-404f-a6dd-92ae842047ce",
+  "versionId": "aee5289e-54ca-404d-9130-47591c68ee0b",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },
