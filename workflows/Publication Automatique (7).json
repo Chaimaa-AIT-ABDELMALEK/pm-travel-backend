@@ -28,7 +28,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODEyOTAyMTV9.m29svmujSw19-GDj1k-iGTtBhVAwjnh7W3pABGbevAA"
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
             }
           ]
         },
@@ -90,8 +90,8 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        352,
-        -368
+        304,
+        -480
       ],
       "id": "5b2b52e5-eaea-4789-963e-7df03ef17f4e",
       "name": "Loop Over Items"
@@ -105,7 +105,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODEyOTAyMTV9.m29svmujSw19-GDj1k-iGTtBhVAwjnh7W3pABGbevAA"
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
             }
           ]
         },
@@ -321,8 +321,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        176,
-        -96
+        128,
+        16
       ],
       "id": "6cc06bf7-7b08-41a9-ab4e-1c6dde2e6b35",
       "name": "Code in JavaScript"
@@ -440,7 +440,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "aee5289e-54ca-404d-9130-47591c68ee0b",
+  "versionId": "2f76e586-85ed-431a-a0cb-1d4aecebbc8e",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },
