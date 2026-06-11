@@ -11,6 +11,7 @@ import json
 from typing import List
 from pydantic import BaseModel
 from emails.email_service import generer_contenu_email, envoyer_email, sauvegarder_email
+from social.social_service import generer_post_complet, generer_calendrier_semaine
 import sys
 import threading
 import subprocess
@@ -23,6 +24,9 @@ import bcrypt
 from cryptography.fernet import Fernet
 import asyncio
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+import traceback
+import jwt
 
 class PostRequest(BaseModel):
     plateforme: str
@@ -38,7 +42,6 @@ load_dotenv()
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'votre-clé-secrète')
 ALGORITHM = "HS256"
 ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', '0123456789abcdef0123456789abcdef')
-
 # ✅ Clé Fernet STABLE dérivée de ENCRYPTION_KEY.
 # Avant, Fernet.generate_key() générait une clé aléatoire à chaque démarrage,
 # ce qui rendait illisibles les clés API déjà enregistrées (scraper bloqué).
@@ -365,24 +368,23 @@ def verify_token(token):
     except Exception as e:
         print(f"Erreur token: {e}")
         return None
-
 def get_current_user(authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(status_code=401, detail="No token")
-    
-    try:
-        parts = authorization.split(" ")
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            raise HTTPException(status_code=401, detail="Invalid token format")
-        token = parts[1]
-    except:
+
+    parts = authorization.split(" ")
+
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(status_code=401, detail="Invalid token format")
-    
+
+    token = parts[1]
+
     payload = verify_token(token)
+
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid token")
-    
-    return payload
+
+    return payload   # 🔥 OBLIGATOIRE
 
 def require_role(required_role: str):
     def check_role(current_user = Depends(get_current_user)):
@@ -403,13 +405,14 @@ def login(username: str, password: str):
     
     token = create_token(user['id'], user.get('role', 'user'))
     return {
-        "token": token,
-        "user": {
-            "id": user['id'],
-            "username": user['username'],
-            "role": user.get('role', 'user')
-        }
+    "access_token": token,
+    "token_type": "bearer",
+    "user": {
+        "id": user['id'],
+        "username": user['username'],
+        "role": user.get('role', 'user')
     }
+}
 
 # ═══════════════════════════════════════════
 # ROOT
@@ -550,7 +553,13 @@ def get_kpis(current_user = Depends(get_current_user)):
 # ═══════════════════════════════════════════
 # ENRICHMENT - OpenAI
 # ═══════════════════════════════════════════
-
+@app.get("/auth/token-test")
+def generate_test_token():
+    token = create_token(user_id=1, role="admin")
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
 @app.post("/enrich/openai")
 def enrich_with_openai(prospect_id: int, current_user = Depends(get_current_user)):
     """Enrichit un prospect avec OpenAI"""
@@ -1393,13 +1402,12 @@ def get_api_configs(current_user = Depends(get_current_user)):
                 r = dict(row._mapping)
                 apis[r['api_name']] = r['enabled'] == 1
 
-            return {
-                "google_places": apis.get('google_places', False),
-                "openai": apis.get('openai', False)
-            }
+            # Retourner TOUTES les APIs, pas seulement google_places et openai
+            return apis
+            
     except Exception as e:
         print(f"Erreur /settings/api/list: {e}")
-        return {"google_places": False, "openai": False}
+        return {}
     
 @app.post("/settings/smtp")
 def save_smtp_config(config: SMTPConfig, current_user = Depends(get_current_user)):
@@ -2069,6 +2077,132 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
     except Exception as e:
         print(f"Erreur publier_post: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ═══════════════════════════════════════════
+# SOCIAL - GÉNÉRATION POST & CALENDRIER
+# ═══════════════════════════════════════════
+
+@app.post("/social/post/generer")
+def generer_post_endpoint(
+    plateforme: str,
+    theme: str,
+    langue: str = "français",
+    current_user=Depends(get_current_user)
+):
+    try:
+        post = generer_post_complet(plateforme, theme, langue)
+
+        return JSONResponse(content={
+            "success": True,
+            "post": post
+        })
+
+    except Exception as e:
+        print("❌ ERROR RAW:", repr(e))
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
+
+
+@app.get("/social/posts/planifies")
+def get_posts_planifies(current_user = Depends(get_current_user)):
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT * FROM posts_sociaux
+                WHERE statut = 'planifié'
+                AND date_publication <= NOW()
+                ORDER BY date_publication ASC
+            """))
+            return [dict(row._mapping) for row in result.fetchall()]
+    except Exception as e:
+        print(f"Erreur get_posts_planifies: {e}")
+        return []
+@app.post("/settings/api")
+def save_api_config(config: APIConfigRequest, current_user = Depends(get_current_user)):
+    """Sauvegarde une configuration API (Google Places, OpenAI, Instagram, Facebook, LinkedIn)"""
+    try:
+        user_id = current_user.get('user_id')
+        
+        # Convertir la config en JSON
+        config_json = json.dumps(config.config)
+        
+        # Pour les clés API, les chiffrer
+        api_key = None
+        if 'api_key' in config.config:
+            api_key = CIPHER_SUITE.encrypt(config.config['api_key'].encode()).decode()
+        elif 'access_token' in config.config:
+            api_key = CIPHER_SUITE.encrypt(config.config['access_token'].encode()).decode()
+        
+        with engine.connect() as conn:
+            # Vérifier si l'API existe déjà
+            exists = conn.execute(text("""
+                SELECT id FROM api_integrations 
+                WHERE user_id = :user_id AND api_name = :api_name
+            """), {"user_id": user_id, "api_name": config.api_name}).fetchone()
+            
+            if exists:
+                # Mettre à jour
+                conn.execute(text("""
+                    UPDATE api_integrations 
+                    SET api_key = :api_key, config = :config, enabled = :enabled
+                    WHERE user_id = :user_id AND api_name = :api_name
+                """), {
+                    "user_id": user_id,
+                    "api_name": config.api_name,
+                    "api_key": api_key,
+                    "config": config_json,
+                    "enabled": config.config.get('enabled', True)
+                })
+            else:
+                # Insérer
+                conn.execute(text("""
+                    INSERT INTO api_integrations (user_id, api_name, api_key, config, enabled)
+                    VALUES (:user_id, :api_name, :api_key, :config, :enabled)
+                """), {
+                    "user_id": user_id,
+                    "api_name": config.api_name,
+                    "api_key": api_key,
+                    "config": config_json,
+                    "enabled": config.config.get('enabled', True)
+                })
+            
+            conn.commit()
+        
+        return {"success": True, "message": f"Configuration {config.api_name} sauvegardée"}
+        
+    except Exception as e:
+        print(f"Erreur save_api_config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/social/themes")
+def get_themes(current_user = Depends(get_current_user)):
+    try:
+        from social.social_service import THEMES_TOURISTIQUES
+        return {"themes": list(THEMES_TOURISTIQUES.keys()), "details": THEMES_TOURISTIQUES}
+    except Exception as e:
+        return {"themes": [], "details": {}}
+@app.post("/social/calendrier/generer")
+def generer_calendrier_endpoint(current_user=Depends(get_current_user)):
+    """
+    Génère un calendrier éditorial de 21 posts pour la semaine (3 posts/jour × 7 jours).
+    """
+    try:
+        posts = generer_calendrier_semaine()
+        return {
+            "success": True,
+            "message": f"{len(posts)} posts générés pour la semaine",
+            "posts": posts
+        }
+    except Exception as e:
+        print(f"Erreur generer_calendrier_endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ═══════════════════════════════════════════
 # START

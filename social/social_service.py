@@ -5,6 +5,7 @@ import requests
 import pymysql
 from datetime import datetime, timedelta
 import json
+import base64
 
 load_dotenv()
 
@@ -62,6 +63,68 @@ THEMES_TOURISTIQUES = {
 }
 
 # ─────────────────────────────────────────
+# HÉBERGEMENT IMAGE SUR IMGBB
+# ─────────────────────────────────────────
+
+def heberger_image_sur_imgbb(url_image):
+    """Télécharge l'image et l'héberge sur imgbb (gratuit)"""
+    try:
+        print(f"   📥 Téléchargement de l'image depuis {url_image[:50]}...")
+        
+        # Télécharger l'image
+        response = requests.get(url_image, timeout=30)
+        response.raise_for_status()
+        
+        # Convertir en base64
+        image_base64 = base64.b64encode(response.content).decode('utf-8')
+        
+        # Envoyer à imgbb
+        api_key = os.getenv('IMGBB_API_KEY')
+        
+        if not api_key:
+            print("   ⚠️ IMGBB_API_KEY non configurée, utilisation de l'URL d'origine")
+            return url_image
+        
+        imgbb_url = "https://api.imgbb.com/1/upload"
+        payload = {
+            "key": api_key,
+            "image": image_base64
+        }
+        
+        response = requests.post(imgbb_url, data=payload, timeout=30)
+        if response.status_code == 200:
+            new_url = response.json()['data']['url']
+            print(f"   ✅ Image hébergée sur imgbb")
+            return new_url
+        else:
+            print(f"   ⚠️ Erreur imgbb: {response.status_code}")
+            return url_image
+            
+    except Exception as e:
+        print(f"   ❌ Erreur hébergement: {e}")
+        return url_image
+
+# ─────────────────────────────────────────
+# GÉNÉRATION IMAGE
+# ─────────────────────────────────────────
+
+def generer_image_post(theme):
+    # Images sources (Pexels)
+    images_source = {
+        'desert': 'https://images.pexels.com/photos/1076758/desert-dunes-sahara-morocco-1076758.jpg',
+        'medina': 'https://images.pexels.com/photos/2360750/morocco-marrakech-medina-2360750.jpg',
+        'montagne': 'https://images.pexels.com/photos/2387873/atlas-mountains-morocco-2387873.jpg',
+        'gastronomie': 'https://images.pexels.com/photos/958545/moroccan-food-tajine-958545.jpg',
+        'luxe': 'https://images.pexels.com/photos/258154/riad-marrakech-pool-258154.jpg',
+        'aventure': 'https://images.pexels.com/photos/934651/quad-desert-adventure-934651.jpg'
+    }
+    
+    url_source = images_source.get(theme, images_source['desert'])
+    
+    # Héberger l'image sur imgbb pour qu'Instagram puisse la lire
+    return heberger_image_sur_imgbb(url_source)
+
+# ─────────────────────────────────────────
 # GÉNÉRATION CONTENU AVEC CHATGPT
 # ─────────────────────────────────────────
 
@@ -75,7 +138,6 @@ def generer_contenu_post(plateforme, theme, langue='français'):
     else:
         instruction_langue = "Écris le post en français."
 
-    # Limites de caractères par plateforme
     limites = {
         'instagram': 2200,
         'facebook': 500,
@@ -84,7 +146,6 @@ def generer_contenu_post(plateforme, theme, langue='français'):
     }
     limite = limites.get(plateforme, 500)
 
-    # Ton par plateforme
     tons = {
         'instagram': 'inspirant et visuel avec des emojis',
         'facebook': 'chaleureux et engageant pour une communauté',
@@ -113,52 +174,14 @@ def generer_contenu_post(plateforme, theme, langue='français'):
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {
-                "role": "system",
-                "content": "Tu es un expert en marketing digital pour le tourisme marocain."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
+            {"role": "system", "content": "Tu es un expert en marketing digital pour le tourisme marocain."},
+            {"role": "user", "content": prompt}
         ],
         max_tokens=600,
         temperature=0.8
     )
 
     return response.choices[0].message.content.strip()
-
-# ─────────────────────────────────────────
-# GÉNÉRATION IMAGE AVEC DALL-E
-# ─────────────────────────────────────────
-
-def generer_image_post(theme):
-    theme_info = THEMES_TOURISTIQUES.get(theme, THEMES_TOURISTIQUES['medina'])
-
-    prompts_images = {
-        'desert': "Stunning Sahara desert landscape at golden sunset, Morocco, sand dunes, camel silhouette, warm colors, professional travel photography",
-        'medina': "Beautiful Marrakech medina street, colorful souks, traditional Moroccan architecture, lanterns, vibrant colors, professional photography",
-        'montagne': "Atlas Mountains Morocco, green valleys, traditional Berber village, snow peaks, dramatic landscape, professional travel photography",
-        'gastronomie': "Traditional Moroccan food spread, tajine, colorful spices, couscous, mint tea, beautiful ceramic plates, professional food photography",
-        'luxe': "Luxury Moroccan riad courtyard, pool, roses, tiles zellige, elegant decor, soft lighting, professional architecture photography",
-        'aventure': "Adventure quad biking in Moroccan desert, action shot, dust, sunset, exciting outdoor activity, professional photography"
-    }
-
-    image_prompt = prompts_images.get(
-        theme,
-        "Beautiful Morocco landscape, travel photography, vibrant colors"
-    )
-
-    response = openai_client.images.generate(
-        model="dall-e-3",
-        prompt=image_prompt,
-        size="1024x1024",
-        quality="standard",
-        n=1
-    )
-
-    image_url = response.data[0].url
-    return image_url
 
 # ─────────────────────────────────────────
 # SAUVEGARDER POST DANS MYSQL
@@ -204,12 +227,6 @@ def sauvegarder_post(plateforme, contenu, image_url, hashtags, theme, langue, da
 # ─────────────────────────────────────────
 
 def generer_post_complet(plateforme, theme=None, langue='français', date_publication=None):
-    """
-    Génère un post complet.
-    Si theme=None, utilise le thème courant de la plateforme.
-    """
-    
-    # Si aucun thème spécifié, utilise la rotation automatique
     if theme is None:
         theme = obtenir_theme_courant(plateforme)
     
@@ -218,36 +235,20 @@ def generer_post_complet(plateforme, theme=None, langue='français', date_public
     if not date_publication:
         date_publication = datetime.now() + timedelta(hours=1)
 
-    # Générer le contenu texte
     contenu = generer_contenu_post(plateforme, theme, langue)
     print(f"   ✅ Contenu généré ({len(contenu)} caractères)")
 
-    # Générer l'image
     image_url = generer_image_post(theme)
-    print(f"   ✅ Image générée")
+    print(f"   ✅ Image générée: {image_url[:80]}...")
 
-    # Récupérer les hashtags du thème
-    hashtags = THEMES_TOURISTIQUES.get(
-        theme,
-        THEMES_TOURISTIQUES['medina']
-    )['hashtags']
+    hashtags = THEMES_TOURISTIQUES.get(theme, THEMES_TOURISTIQUES['medina'])['hashtags']
 
-    # Sauvegarder dans MySQL
-    post_id = sauvegarder_post(
-        plateforme,
-        contenu,
-        image_url,
-        hashtags,
-        theme,
-        langue,
-        date_publication
-    )
+    post_id = sauvegarder_post(plateforme, contenu, image_url, hashtags, theme, langue, date_publication)
     
-    # IMPORTANT: Avancer au thème suivant après la génération
     incrementer_theme_index(plateforme)
     
     position = obtenir_position_rotation(plateforme)
-    print(f"   📊 Prochaine position: {position}/6 pour {plateforme}")
+    print(f"   📊 Prochaine position: {position+1}/6 pour {plateforme}")
 
     return {
         'id': post_id,
@@ -265,12 +266,6 @@ def generer_post_complet(plateforme, theme=None, langue='français', date_public
 # ─────────────────────────────────────────
 
 def generer_calendrier_semaine():
-    """
-    Génère automatiquement un calendrier de posts pour toute la semaine.
-    3 posts par jour sur différentes plateformes.
-    
-    IMPORTANT: Chaque plateforme utilise sa propre rotation de thèmes!
-    """
     plateformes = ['instagram', 'facebook', 'linkedin']
     langues = ['français', 'anglais', 'espagnol']
 
@@ -278,30 +273,19 @@ def generer_calendrier_semaine():
     maintenant = datetime.now()
 
     print("\n" + "="*60)
-    print("🎯 GÉNÉRATION CALENDRIER HEBDOMADAIRE INTELLIGENTE")
+    print("🎯 GÉNÉRATION CALENDRIER HEBDOMADAIRE")
     print("="*60)
 
-    # 7 jours × 3 posts = 21 posts pour la semaine
     for jour in range(7):
         jour_nom = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'][jour]
         print(f"\n📅 {jour_nom}")
-        print("-" * 60)
         
         for plateforme in plateformes:
-            # Heure de publication optimale par plateforme
-            heures_optimales = {
-                'instagram': 18,  # 18h
-                'facebook': 12,   # 12h
-                'linkedin': 9     # 9h
-            }
+            heures_optimales = {'instagram': 18, 'facebook': 12, 'linkedin': 9}
             heure = heures_optimales.get(plateforme, 12)
 
-            date_pub = maintenant.replace(
-                hour=heure, minute=0, second=0
-            ) + timedelta(days=jour)
+            date_pub = maintenant.replace(hour=heure, minute=0, second=0) + timedelta(days=jour)
 
-            # LA CLÉ: Pas de thème spécifié!
-            # La fonction utilisera la rotation automatique
             theme = obtenir_theme_courant(plateforme)
             langue = langues[jour % len(langues)]
 
@@ -309,144 +293,47 @@ def generer_calendrier_semaine():
             posts_generes.append(post)
 
     print("\n" + "="*60)
-    print(f"✅ CALENDRIER COMPLET GÉNÉRÉ: {len(posts_generes)} posts")
+    print(f"✅ {len(posts_generes)} posts générés")
     print("="*60)
     
     return posts_generes
-# ─────────────────────────────────────────
-# METTRE À JOUR STATUT POST
-# ─────────────────────────────────────────
-
-def mettre_a_jour_statut_post(post_id, statut):
-    conn = connect_db()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE posts_sociaux SET statut = %s WHERE id = %s
-            """, (statut, post_id))
-            cursor.execute("""
-                UPDATE calendrier_editorial SET statut = %s WHERE post_id = %s
-            """, (
-                'publié' if statut == 'publié' else statut,
-                post_id
-            ))
-        conn.commit()
-    finally:
-        conn.close()
 
 # ─────────────────────────────────────────
-# LOGGER ACTION
-# ─────────────────────────────────────────
-
-def logger_action(post_id, plateforme, action, resultat):
-    conn = connect_db()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO logs_sociaux
-                (post_id, plateforme, action, resultat)
-                VALUES (%s, %s, %s, %s)
-            """, (post_id, plateforme, action, resultat))
-        conn.commit()
-    finally:
-        conn.close()
-        # ─────────────────────────────────────────
 # GESTION DE LA ROTATION DES THÈMES
 # ─────────────────────────────────────────
 
 def obtenir_theme_courant(plateforme):
-    """
-    Récupère le thème actuel pour une plateforme
-    basé sur son index de rotation.
-    """
     conn = connect_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT theme_index, themes_list
-                FROM rotation_themes
-                WHERE plateforme = %s
-            """, (plateforme,))
-            
+            cursor.execute("SELECT theme_index, themes_list FROM rotation_themes WHERE plateforme = %s", (plateforme,))
             result = cursor.fetchone()
             if not result:
-                # Si la plateforme n'existe pas, créer une entrée
-                cursor.execute("""
-                    INSERT INTO rotation_themes (plateforme)
-                    VALUES (%s)
-                """, (plateforme,))
+                cursor.execute("INSERT INTO rotation_themes (plateforme) VALUES (%s)", (plateforme,))
                 conn.commit()
                 return list(THEMES_TOURISTIQUES.keys())[0]
             
             theme_index = result[0]
             themes_list = json.loads(result[1])
-            
-            # Récupérer le thème à cet index
-            theme = themes_list[theme_index % len(themes_list)]
-            return theme
-            
+            return themes_list[theme_index % len(themes_list)]
     finally:
         conn.close()
-
 
 def incrementer_theme_index(plateforme):
-    """
-    Avance au thème suivant pour une plateforme.
-    Se réinitialise automatiquement à 0 après le dernier thème.
-    """
     conn = connect_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE rotation_themes
-                SET theme_index = (theme_index + 1) % 6
-                WHERE plateforme = %s
-            """, (plateforme,))
+            cursor.execute("UPDATE rotation_themes SET theme_index = (theme_index + 1) %% 6 WHERE plateforme = %s", (plateforme,))
             conn.commit()
-            print(f"   ✅ Index avancé pour {plateforme}")
-            
     finally:
         conn.close()
-
-
-def obtenir_tous_les_themes(plateforme):
-    """
-    Récupère la liste complète des thèmes pour une plateforme.
-    """
-    conn = connect_db()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT themes_list
-                FROM rotation_themes
-                WHERE plateforme = %s
-            """, (plateforme,))
-            
-            result = cursor.fetchone()
-            if result:
-                return json.loads(result[0])
-            return list(THEMES_TOURISTIQUES.keys())
-            
-    finally:
-        conn.close()
-
 
 def obtenir_position_rotation(plateforme):
-    """
-    Récupère la position actuelle dans la rotation.
-    Utile pour afficher: "Theme 2/6"
-    """
     conn = connect_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT theme_index
-                FROM rotation_themes
-                WHERE plateforme = %s
-            """, (plateforme,))
-            
+            cursor.execute("SELECT theme_index FROM rotation_themes WHERE plateforme = %s", (plateforme,))
             result = cursor.fetchone()
             return result[0] if result else 0
-            
     finally:
         conn.close()
