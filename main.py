@@ -1175,16 +1175,24 @@ def get_contacts_from_scraping(current_user = Depends(get_current_user)):
 def creer_campagne(nom: str, sujet: str, current_user = Depends(get_current_user)):
     try:
         with engine.connect() as conn:
-            conn.execute(text("""
+            result = conn.execute(text("""
                 INSERT INTO campagnes (nom, sujet, statut)
                 VALUES (:nom, :sujet, 'brouillon')
             """), {"nom": nom, "sujet": sujet})
+            
+            # Récupérer l'ID de la dernière insertion
+            campagne_id = result.lastrowid
+            
             conn.commit()
-            return {"message": "Campagne créée ✅"}
+            
+            # Retourner l'ID avec le message
+            return {
+                "id": campagne_id,
+                "message": "Campagne créée ✅"
+            }
     except Exception as e:
         print(f"Erreur creer_campagne: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/campagnes")
 def get_campagnes(current_user = Depends(get_current_user)):
     try:
@@ -1433,13 +1441,192 @@ def save_smtp_config(config: SMTPConfig, current_user = Depends(get_current_user
 
 @app.post("/settings/smtp/test")
 async def test_smtp(config: SMTPConfig, current_user = Depends(get_current_user)):
-    """Teste la connexion SMTP"""
+    """Teste l'envoi d'email selon le provider choisi"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    
     try:
         test_email = os.getenv('TEST_EMAIL', 'chaimaaait2005@gmail.com')
-        return {"success": True, "message": f"✅ Email test envoyé à {test_email}!"}
+        user_id = current_user.get('user_id')
+        
+        sujet = "[TEST] Vérification configuration SMTP"
+        contenu = f"""
+Bonjour,
+
+Ceci est un email de test pour vérifier la configuration SMTP du CRM.
+
+Provider: {config.provider}
+Email expéditeur: {config.email}
+Date: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+
+Si vous recevez cet email, votre configuration est correcte !
+
+Cordialement,
+L'équipe PM Travel CRM
+"""
+        
+        success = False
+        
+        # ─────────────────────────────────────────
+        # SENDGRID (API REST)
+        # ─────────────────────────────────────────
+        if config.provider == 'sendgrid':
+            try:
+                import sendgrid
+                from sendgrid.helpers.mail import Mail
+                
+                # Utiliser la clé du .env si celle du frontend est invalide
+                api_key = config.password
+                if not api_key or not api_key.startswith('SG.'):
+                    print("⚠️ Clé API frontend invalide, utilisation de la clé du .env")
+                    api_key = os.getenv('SENDGRID_API_KEY')
+                
+                if not api_key:
+                    raise Exception("Aucune clé API SendGrid disponible")
+                
+                sg = sendgrid.SendGridAPIClient(api_key=api_key)
+                message = Mail(
+                    from_email=config.email,
+                    to_emails=test_email,
+                    subject=sujet,
+                    plain_text_content=contenu
+                )
+                response = sg.send(message)
+                success = 200 <= response.status_code < 300
+                
+                if success:
+                    print(f"✅ SendGrid: Email envoyé avec succès (status {response.status_code})")
+                else:
+                    raise Exception(f"Status {response.status_code}: {response.body}")
+                    
+            except Exception as e:
+                raise Exception(f"SendGrid error: {str(e)}")
+        
+        # ─────────────────────────────────────────
+        # GMAIL (SMTP avec mot de passe d'application)
+        # ─────────────────────────────────────────
+        elif config.provider == 'gmail':
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = config.email
+                msg['To'] = test_email
+                msg['Subject'] = sujet
+                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
+                
+                # Connexion Gmail
+                server = smtplib.SMTP('smtp.gmail.com', 587)
+                server.set_debuglevel(True)  # Pour debug
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(config.email, config.password)
+                server.send_message(msg)
+                server.quit()
+                success = True
+                print(f"✅ Gmail: Email envoyé avec succès à {test_email}")
+                
+            except smtplib.SMTPAuthenticationError:
+                raise Exception("Erreur d'authentification Gmail. Utilisez un mot de passe d'application (https://myaccount.google.com/apppasswords)")
+            except Exception as e:
+                raise Exception(f"Gmail error: {str(e)}")
+        
+        # ─────────────────────────────────────────
+        # HOSTINGER (SMTP SSL)
+        # ─────────────────────────────────────────
+        elif config.provider == 'hostinger':
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = config.email
+                msg['To'] = test_email
+                msg['Subject'] = sujet
+                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
+                
+                # Configuration Hostinger
+                smtp_host = config.host or 'smtp.hostinger.com'
+                smtp_port = config.port or 465
+                
+                print(f"📧 Connexion Hostinger: {smtp_host}:{smtp_port}")
+                
+                # Connexion SSL directe
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port)
+                server.login(config.email, config.password)
+                server.send_message(msg)
+                server.quit()
+                success = True
+                print(f"✅ Hostinger: Email envoyé avec succès à {test_email}")
+                
+            except smtplib.SMTPAuthenticationError:
+                raise Exception("Erreur d'authentification Hostinger. Vérifiez email/mot de passe")
+            except Exception as e:
+                raise Exception(f"Hostinger error: {str(e)}")
+        
+        # ─────────────────────────────────────────
+        # CUSTOM (Provider personnalisé)
+        # ─────────────────────────────────────────
+        elif config.provider == 'custom':
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = config.email
+                msg['To'] = test_email
+                msg['Subject'] = sujet
+                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
+                
+                if not config.host:
+                    raise Exception("Host requis pour un provider custom")
+                
+                # Connexion selon le port
+                if config.port == 465:
+                    server = smtplib.SMTP_SSL(config.host, config.port)
+                else:
+                    server = smtplib.SMTP(config.host, config.port or 587)
+                    server.starttls()
+                
+                server.login(config.email, config.password)
+                server.send_message(msg)
+                server.quit()
+                success = True
+                print(f"✅ Custom: Email envoyé avec succès à {test_email}")
+                
+            except Exception as e:
+                raise Exception(f"Custom SMTP error: {str(e)}")
+        
+        else:
+            raise Exception(f"Provider '{config.provider}' non supporté. Choix disponibles: sendgrid, gmail, hostinger, custom")
+        
+        # ─────────────────────────────────────────
+        # SAUVEGARDE DANS LA BASE DE DONNÉES
+        # ─────────────────────────────────────────
+        if success:
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    INSERT INTO emails_envoyes 
+                    (user_id, email_destinataire, sujet, contenu, statut, date_envoi)
+                    VALUES (:user_id, :email, :sujet, :contenu, 'envoyé', NOW())
+                """), {
+                    "user_id": user_id,
+                    "email": test_email,
+                    "sujet": sujet,
+                    "contenu": contenu
+                })
+                conn.commit()
+            
+            return {
+                "success": True, 
+                "message": f"✅ Email test envoyé avec {config.provider} à {test_email}!"
+            }
+        else:
+            raise Exception("L'envoi a échoué sans erreur spécifique")
+        
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"❌ Erreur auth SMTP: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Erreur d'authentification {config.provider}. Vérifiez email/mot de passe.")
+    except smtplib.SMTPException as e:
+        print(f"❌ Erreur SMTP: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Erreur SMTP {config.provider}: {str(e)}")
     except Exception as e:
-        print(f"Erreur test SMTP: {e}")
-        raise HTTPException(status_code=400, detail=f"❌ Erreur SMTP: {str(e)}")
+        print(f"❌ Erreur test SMTP: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Erreur {config.provider}: {str(e)}")
 
 @app.post("/settings/imap")
 def save_imap_config(config: IMAPConfig, current_user = Depends(get_current_user)):
