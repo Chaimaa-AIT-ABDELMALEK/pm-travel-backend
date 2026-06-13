@@ -23,7 +23,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/campagnes?nom=Campagne+automatique&sujet=Partenariat+PM+Travel",
+        "url": "http://127.0.0.1:8000/campagnes?nom=Campagne+automatique&sujet=Partenariat+PM+Travel",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -38,7 +47,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://localhost:8000/campagnes/{{ $json.id }}/lancer",
+        "url": "=http://127.0.0.1:8000/campagnes/{{ $json.id }}/lancer",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -68,7 +86,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/sequences/relances",
+        "url": "http://127.0.0.1:8000/sequences/relances",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -133,10 +160,11 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "60ca2721-b742-400e-8007-425c8045228a",
+  "versionId": "33f4964a-0480-4fdf-8444-f37f37dd40ee",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },
+  "nodeGroups": [],
   "id": "YQ4FQ7bIVf2vfiWU",
   "tags": []
 }
