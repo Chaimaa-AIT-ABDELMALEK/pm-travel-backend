@@ -71,30 +71,45 @@ import random
 
 def generer_image_post(theme):
     """
-    Génère une image aléatoire unique pour chaque post
-    Utilise Picsum (gratuit, fiable, pas d'API key)
+    Images statiques par thème — URLs directes compatibles Instagram
+    (Pexels CDN, pas de redirect, HTTPS, JPG)
     """
-    # IDs d'images qui ressemblent à des photos de voyage
-    # (paysages, désert, montagnes, architecture, nourriture, luxe)
     images_par_theme = {
-        'desert': [104, 105, 106, 107, 108, 109, 110, 111, 112],
-        'medina': [113, 114, 115, 116, 117, 118, 119, 120],
-        'montagne': [121, 122, 123, 124, 125, 126, 127, 128],
-        'gastronomie': [129, 130, 131, 132, 133, 134, 135],
-        'luxe': [136, 137, 138, 139, 140, 141, 142],
-        'aventure': [143, 144, 145, 146, 147, 148, 149, 150]
+        'desert': [
+            'https://images.pexels.com/photos/1001435/pexels-photo-1001435.jpeg',
+            'https://images.pexels.com/photos/3889843/pexels-photo-3889843.jpeg',
+            'https://images.pexels.com/photos/2144326/pexels-photo-2144326.jpeg',
+        ],
+        'medina': [
+            'https://images.pexels.com/photos/3889843/pexels-photo-3889843.jpeg',
+            'https://images.pexels.com/photos/2404843/pexels-photo-2404843.jpeg',
+            'https://images.pexels.com/photos/3889855/pexels-photo-3889855.jpeg',
+        ],
+        'montagne': [
+            'https://images.pexels.com/photos/1366919/pexels-photo-1366919.jpeg',
+            'https://images.pexels.com/photos/2440021/pexels-photo-2440021.jpeg',
+            'https://images.pexels.com/photos/1054218/pexels-photo-1054218.jpeg',
+        ],
+        'gastronomie': [
+            'https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg',
+            'https://images.pexels.com/photos/2347311/pexels-photo-2347311.jpeg',
+            'https://images.pexels.com/photos/1435904/pexels-photo-1435904.jpeg',
+        ],
+        'luxe': [
+            'https://images.pexels.com/photos/261102/pexels-photo-261102.jpeg',
+            'https://images.pexels.com/photos/1134176/pexels-photo-1134176.jpeg',
+            'https://images.pexels.com/photos/2869215/pexels-photo-2869215.jpeg',
+        ],
+        'aventure': [
+            'https://images.pexels.com/photos/1659438/pexels-photo-1659438.jpeg',
+            'https://images.pexels.com/photos/2356045/pexels-photo-2356045.jpeg',
+            'https://images.pexels.com/photos/1271619/pexels-photo-1271619.jpeg',
+        ]
     }
-    
-    # Prend les IDs du thème, ou tous si thème non trouvé
-    ids_disponibles = images_par_theme.get(theme, list(range(1, 200)))
-    
-    # Choisit un ID aléatoire
-    image_id = random.choice(ids_disponibles)
-    
-    # Format fixe 800x600 (bon pour Instagram/Facebook)
-    url = f"https://picsum.photos/id/{image_id}/800/600.jpg"
-    
-    print(f"   🖼️ Image générée pour thème '{theme}': {url}")
+
+    urls = images_par_theme.get(theme, images_par_theme['medina'])
+    url = random.choice(urls)
+    print(f"   🖼️ Image pour thème '{theme}': {url}")
     return url
 
 # ─────────────────────────────────────────
