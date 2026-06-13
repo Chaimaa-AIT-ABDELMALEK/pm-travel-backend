@@ -24,6 +24,15 @@
       "parameters": {
         "method": "POST",
         "url": "http://127.0.0.1:8000/scraper/lancer",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -174,10 +183,11 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "b985544d-9fe5-4a46-a4ef-d4091354f181",
+  "versionId": "ab3d2f54-150f-48db-aaff-d5c00c7b35bb",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },
+  "nodeGroups": [],
   "id": "siuyIoieq2AzMnwi",
   "tags": []
 }

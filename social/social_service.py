@@ -62,67 +62,40 @@ THEMES_TOURISTIQUES = {
     }
 }
 
-# ─────────────────────────────────────────
-# HÉBERGEMENT IMAGE SUR IMGBB
-# ─────────────────────────────────────────
-
-def heberger_image_sur_imgbb(url_image):
-    """Télécharge l'image et l'héberge sur imgbb (gratuit)"""
-    try:
-        print(f"   📥 Téléchargement de l'image depuis {url_image[:50]}...")
-        
-        # Télécharger l'image
-        response = requests.get(url_image, timeout=30)
-        response.raise_for_status()
-        
-        # Convertir en base64
-        image_base64 = base64.b64encode(response.content).decode('utf-8')
-        
-        # Envoyer à imgbb
-        api_key = os.getenv('IMGBB_API_KEY')
-        
-        if not api_key:
-            print("   ⚠️ IMGBB_API_KEY non configurée, utilisation de l'URL d'origine")
-            return url_image
-        
-        imgbb_url = "https://api.imgbb.com/1/upload"
-        payload = {
-            "key": api_key,
-            "image": image_base64
-        }
-        
-        response = requests.post(imgbb_url, data=payload, timeout=30)
-        if response.status_code == 200:
-            new_url = response.json()['data']['url']
-            print(f"   ✅ Image hébergée sur imgbb")
-            return new_url
-        else:
-            print(f"   ⚠️ Erreur imgbb: {response.status_code}")
-            return url_image
-            
-    except Exception as e:
-        print(f"   ❌ Erreur hébergement: {e}")
-        return url_image
 
 # ─────────────────────────────────────────
 # GÉNÉRATION IMAGE
 # ─────────────────────────────────────────
 
+import random
+
 def generer_image_post(theme):
-    # Images sources (Pexels)
-    images_source = {
-        'desert': 'https://images.pexels.com/photos/1076758/desert-dunes-sahara-morocco-1076758.jpg',
-        'medina': 'https://images.pexels.com/photos/2360750/morocco-marrakech-medina-2360750.jpg',
-        'montagne': 'https://images.pexels.com/photos/2387873/atlas-mountains-morocco-2387873.jpg',
-        'gastronomie': 'https://images.pexels.com/photos/958545/moroccan-food-tajine-958545.jpg',
-        'luxe': 'https://images.pexels.com/photos/258154/riad-marrakech-pool-258154.jpg',
-        'aventure': 'https://images.pexels.com/photos/934651/quad-desert-adventure-934651.jpg'
+    """
+    Génère une image aléatoire unique pour chaque post
+    Utilise Picsum (gratuit, fiable, pas d'API key)
+    """
+    # IDs d'images qui ressemblent à des photos de voyage
+    # (paysages, désert, montagnes, architecture, nourriture, luxe)
+    images_par_theme = {
+        'desert': [104, 105, 106, 107, 108, 109, 110, 111, 112],
+        'medina': [113, 114, 115, 116, 117, 118, 119, 120],
+        'montagne': [121, 122, 123, 124, 125, 126, 127, 128],
+        'gastronomie': [129, 130, 131, 132, 133, 134, 135],
+        'luxe': [136, 137, 138, 139, 140, 141, 142],
+        'aventure': [143, 144, 145, 146, 147, 148, 149, 150]
     }
     
-    url_source = images_source.get(theme, images_source['desert'])
+    # Prend les IDs du thème, ou tous si thème non trouvé
+    ids_disponibles = images_par_theme.get(theme, list(range(1, 200)))
     
-    # Héberger l'image sur imgbb pour qu'Instagram puisse la lire
-    return heberger_image_sur_imgbb(url_source)
+    # Choisit un ID aléatoire
+    image_id = random.choice(ids_disponibles)
+    
+    # Format fixe 800x600 (bon pour Instagram/Facebook)
+    url = f"https://picsum.photos/id/{image_id}/800/600.jpg"
+    
+    print(f"   🖼️ Image générée pour thème '{theme}': {url}")
+    return url
 
 # ─────────────────────────────────────────
 # GÉNÉRATION CONTENU AVEC CHATGPT

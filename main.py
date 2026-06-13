@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -42,14 +42,10 @@ load_dotenv()
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'votre-clé-secrète')
 ALGORITHM = "HS256"
 ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', '0123456789abcdef0123456789abcdef')
-# ✅ Clé Fernet STABLE dérivée de ENCRYPTION_KEY.
-# Avant, Fernet.generate_key() générait une clé aléatoire à chaque démarrage,
-# ce qui rendait illisibles les clés API déjà enregistrées (scraper bloqué).
 import base64
 import hashlib
 
 def _build_cipher(secret):
-    # Dérive une clé Fernet (32 octets base64-url) déterministe à partir du secret.
     digest = hashlib.sha256(str(secret).encode("utf-8")).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
 
@@ -89,7 +85,6 @@ def init_database():
     """Crée les tables manquantes au démarrage"""
     try:
         with engine.connect() as conn:
-            # ✅ ÉTAPE 1: Ajouter colonne user_id si elle n'existe pas
             try:
                 conn.execute(text("""
                     ALTER TABLE emails_envoyes 
@@ -100,7 +95,6 @@ def init_database():
                 if "Duplicate column" not in str(e):
                     print(f"⚠️ Erreur migration user_id: {e}")
             
-            # ✅ ÉTAPE 2: Ajouter colonne description si elle n'existe pas
             try:
                 conn.execute(text("""
                     ALTER TABLE prospects 
@@ -111,21 +105,13 @@ def init_database():
                 if "Duplicate column" not in str(e):
                     print(f"⚠️ Erreur migration description: {e}")
 
-            # ✅ ÉTAPE 2bis: Empêcher les doublons d'email entre TOUTES les sources
-            #     (Google Places, OpenAI, etc.). Sans contrainte UNIQUE, "INSERT IGNORE"
-            #     n'ignore rien et la base accumule les doublons.
             try:
-                # 0) Si une ancienne contrainte UNIQUE(email) existe (créée par une version
-                #    précédente), on la retire : on déduplique désormais par établissement.
                 try:
                     conn.execute(text("ALTER TABLE prospects DROP INDEX uq_prospects_email"))
                     conn.commit()
                 except Exception:
                     pass
 
-                # 1) Supprime les doublons d'établissement déjà présents
-                #    (même nom + même ville), en gardant la ligne au plus petit id
-                #    (= celle qui a un email vérifié en priorité si c'est le cas).
                 conn.execute(text("""
                     DELETE p1 FROM prospects p1
                     INNER JOIN prospects p2
@@ -134,14 +120,12 @@ def init_database():
                        AND p1.nom IS NOT NULL AND p1.nom <> ''
                        AND p1.id > p2.id
                 """))
-                # 2) Ajoute la contrainte UNIQUE sur (nom, ville)
                 try:
                     conn.execute(text("""
                         ALTER TABLE prospects
                         ADD CONSTRAINT uq_prospects_nom_ville UNIQUE (nom, ville)
                     """))
                 except Exception as e_idx:
-                    # Colonnes TEXT/LONGTEXT : MySQL exige une longueur de préfixe.
                     if ("used in key specification" in str(e_idx)
                             or "key part" in str(e_idx) or "too long" in str(e_idx)):
                         conn.execute(text("""
@@ -156,13 +140,10 @@ def init_database():
                 msg = str(e)
                 if ("Duplicate key name" in msg or "already exists" in msg
                         or "Duplicate entry" in msg or "check that column/key exists" in msg):
-                    # Contrainte déjà présente : rien à faire.
                     pass
                 else:
                     print(f"⚠️ Erreur migration UNIQUE(nom, ville): {e}")
 
-            # ✅ ÉTAPE 3: Créer/Vérifier les tables
-            # Table emails_envoyes
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS emails_envoyes (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -179,7 +160,6 @@ def init_database():
                 )
             """))
             
-            # Table api_integrations
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS api_integrations (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -194,7 +174,6 @@ def init_database():
                 )
             """))
             
-            # Table email_settings
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS email_settings (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -214,7 +193,6 @@ def init_database():
                 )
             """))
             
-            # Table scraping_history
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS scraping_history (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -230,7 +208,6 @@ def init_database():
                 )
             """))
 
-            # Table emails_recus (réponses des prospects)
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS emails_recus (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -251,7 +228,6 @@ def init_database():
                 )
             """))
 
-            # Ajouter colonne tracking_id à emails_envoyes si absente
             try:
                 conn.execute(text("""
                     ALTER TABLE emails_envoyes
@@ -262,7 +238,6 @@ def init_database():
                 if "Duplicate column" not in str(e):
                     pass
 
-            # Ajouter colonne prospect_id à emails_envoyes si absente
             try:
                 conn.execute(text("""
                     ALTER TABLE emails_envoyes
@@ -278,7 +253,6 @@ def init_database():
     except Exception as e:
         print(f"⚠️ Erreur initialisation DB: {e}")
 
-# Appelle l'init au démarrage
 init_database()
 
 # ═══════════════════════════════════════════
@@ -326,6 +300,9 @@ class EmailEnvoyeModel(BaseModel):
     contenu: str
     statut: str = 'envoyé'
 
+class PublishRequest(BaseModel):
+    plateforme: str  # instagram, facebook, linkedin
+
 # ═══════════════════════════════════════════
 # UTILITY FUNCTIONS
 # ═══════════════════════════════════════════
@@ -369,6 +346,7 @@ def verify_token(token):
     except Exception as e:
         print(f"Erreur token: {e}")
         return None
+
 def get_current_user(authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(status_code=401, detail="No token")
@@ -379,13 +357,12 @@ def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid token format")
 
     token = parts[1]
-
     payload = verify_token(token)
 
     if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    return payload   # 🔥 OBLIGATOIRE
+    return payload
 
 def require_role(required_role: str):
     def check_role(current_user = Depends(get_current_user)):
@@ -393,6 +370,47 @@ def require_role(required_role: str):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return current_user
     return check_role
+
+# ═══════════════════════════════════════════
+# HELPER: get_integration_config
+# ═══════════════════════════════════════════
+
+def get_integration_config(api_name: str, user_id: int = None) -> dict:
+    """
+    Récupère la config JSON d'une intégration API.
+    Filtre par user_id si fourni, sinon prend la première ligne active trouvée (fallback n8n/admin).
+    """
+    with engine.connect() as conn:
+        if user_id:
+            row = conn.execute(
+                text("""SELECT config FROM api_integrations
+                        WHERE api_name = :name AND enabled = 1 AND user_id = :uid
+                        LIMIT 1"""),
+                {"name": api_name, "uid": user_id}
+            ).fetchone()
+            # Fallback sans user_id si rien trouvé pour cet utilisateur
+            if not row or not row[0]:
+                row = conn.execute(
+                    text("""SELECT config FROM api_integrations
+                            WHERE api_name = :name AND enabled = 1
+                            LIMIT 1"""),
+                    {"name": api_name}
+                ).fetchone()
+        else:
+            row = conn.execute(
+                text("""SELECT config FROM api_integrations
+                        WHERE api_name = :name AND enabled = 1
+                        LIMIT 1"""),
+                {"name": api_name}
+            ).fetchone()
+
+    if not row or not row[0]:
+        raise HTTPException(400, f"Intégration '{api_name}' manquante ou désactivée en base")
+
+    try:
+        return json.loads(row[0])
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"Config '{api_name}' invalide (JSON malformé): {e}")
 
 # ═══════════════════════════════════════════
 # AUTH
@@ -406,14 +424,37 @@ def login(username: str, password: str):
     
     token = create_token(user['id'], user.get('role', 'user'))
     return {
-    "access_token": token,
-    "token_type": "bearer",
-    "user": {
-        "id": user['id'],
-        "username": user['username'],
-        "role": user.get('role', 'user')
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user['id'],
+            "username": user['username'],
+            "role": user.get('role', 'user')
+        }
     }
-}
+
+@app.post("/auth/refresh")
+def refresh_token(current_user = Depends(get_current_user)):
+    """
+    Génère un nouveau token longue durée (1 an).
+    À utiliser depuis n8n pour ne plus avoir de tokens hardcodés expirés.
+    Workflow n8n : POST /auth/login → récupérer access_token → utiliser dans les nœuds suivants.
+    """
+    new_token = create_token(
+        user_id=current_user['user_id'],
+        role=current_user['role'],
+        expires_in=24 * 365  # 1 an
+    )
+    return {"access_token": new_token, "token_type": "bearer"}
+
+@app.get("/auth/token-test")
+def generate_test_token():
+    """Génère un token admin de test valide 24h (sans authentification requise)."""
+    token = create_token(user_id=1, role="admin")
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
 
 # ═══════════════════════════════════════════
 # ROOT
@@ -493,24 +534,7 @@ def create_prospect(prospect: Prospect, current_user = Depends(get_current_user)
     except Exception as e:
         print(f"❌ Erreur: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-@app.post("/social/posts/{post_id}/publish")
-def marquer_publie(post_id: int, current_user = Depends(get_current_user)):
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("""
-                UPDATE posts_sociaux SET statut = 'publié' WHERE id = :id
-            """), {"id": post_id})
-            conn.commit()
 
-        return {
-            "success": True,
-            "message": f"Post {post_id} publié ✅"
-        }
-
-    except Exception as e:
-        print(f"Erreur marquer_publie: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @app.put("/prospects/{id}/statut")
 def update_statut(id: int, statut: str, current_user = Depends(get_current_user)):
     try:
@@ -554,22 +578,14 @@ def get_kpis(current_user = Depends(get_current_user)):
 # ═══════════════════════════════════════════
 # ENRICHMENT - OpenAI
 # ═══════════════════════════════════════════
-@app.get("/auth/token-test")
-def generate_test_token():
-    token = create_token(user_id=1, role="admin")
-    return {
-        "access_token": token,
-        "token_type": "bearer"
-    }
+
 @app.post("/enrich/openai")
 def enrich_with_openai(prospect_id: int, current_user = Depends(get_current_user)):
     """Enrichit un prospect avec OpenAI"""
     try:
         user_id = current_user.get("user_id")
         
-        # ✅ ÉTAPE 1: Récupère l'API OpenAI configurée
         with engine.connect() as conn:
-            # Récupère le prospect
             result = conn.execute(text("""
                 SELECT nom, secteur, ville, email FROM prospects WHERE id = :id
             """), {"id": prospect_id})
@@ -580,7 +596,6 @@ def enrich_with_openai(prospect_id: int, current_user = Depends(get_current_user
             
             prospect = dict(row._mapping)
             
-            # Récupère la clé OpenAI
             result = conn.execute(text("""
                 SELECT api_key FROM api_integrations 
                 WHERE user_id = :user_id AND api_name = 'openai' AND enabled = 1
@@ -598,7 +613,6 @@ def enrich_with_openai(prospect_id: int, current_user = Depends(get_current_user
             except:
                 return {"error": "Erreur clé API", "success": False}
         
-        # ✅ ÉTAPE 2: Appelle OpenAI pour enrichir
         import openai
         openai.api_key = openai_key
         
@@ -616,7 +630,6 @@ Format: Description brève et pertinente uniquement."""
         
         description = response.choices[0].message.content
         
-        # ✅ ÉTAPE 3: Sauvegarde la description
         with engine.connect() as conn:
             conn.execute(text("""
                 UPDATE prospects SET description = :desc WHERE id = :id
@@ -675,9 +688,6 @@ def _nouveau_job():
         "cancelled": False,
     }
 
-# ✅ DEUX jobs INDÉPENDANTS :
-#   - "env"      -> scraper lancé depuis la page "Scraping" (API du fichier .env)
-#   - "settings" -> scraper lancé depuis la page "Outils"   (API configurée dans Settings)
 SCRAPER_JOBS = {
     "env": _nouveau_job(),
     "settings": _nouveau_job(),
@@ -842,10 +852,9 @@ def _annuler_job(job_key):
 
 @app.post("/scraper/lancer-openai-web-search")
 def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
-    """Page 'Outils' : scraper basé sur OpenAI. Alimente le job 'openai' pour un suivi temps réel."""
+    """Page 'Outils' : scraper basé sur OpenAI."""
     user_id = current_user.get("user_id")
 
-    # ✅ ÉTAPE 1: Récupère l'API OpenAI configurée dans Settings
     try:
         with engine.connect() as conn:
             result = conn.execute(text("""
@@ -869,7 +878,6 @@ def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
         print(f"Erreur récupération API: {e}")
         return {"status": "error", "message": f"❌ Erreur: {str(e)}"}
 
-    # ✅ ÉTAPE 2: Démarre le job partagé 'openai' (refuse si déjà en cours)
     job = SCRAPER_JOBS["openai"]
     lock = SCRAPER_LOCKS["openai"]
     with lock:
@@ -884,7 +892,6 @@ def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
     print(f"\n{'='*60}\n🤖 SCRAPER OPENAI WEB SEARCH\n{'='*60}")
 
     def _appel_openai(client_legacy, client_v1, prompt):
-        """Appelle OpenAI en supportant l'ancienne (v0) et la nouvelle (v1) bibliothèque."""
         if client_v1 is not None:
             resp = client_v1.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -892,7 +899,6 @@ def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
                 max_tokens=500, temperature=0.7,
             )
             return resp.choices[0].message.content
-        # Ancienne API (openai < 1.0)
         resp = client_legacy.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
@@ -906,7 +912,6 @@ def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
 
             client_v1 = None
             client_legacy = None
-            # openai >= 1.0 expose la classe OpenAI ; sinon on retombe sur l'API legacy.
             if hasattr(openai, "OpenAI"):
                 try:
                     client_v1 = openai.OpenAI(api_key=openai_key)
@@ -922,7 +927,6 @@ def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
 
             for secteur in secteurs:
                 for ville in villes:
-                    # Arrêt demandé par l'utilisateur ?
                     with lock:
                         if job.get("cancelled"):
                             break
@@ -957,9 +961,6 @@ Génère maintenant {secteur}s à {ville}:"""
                                     if '@' not in email or '.' not in email:
                                         email = f"{nom.lower().replace(' ', '')}@{vil.lower()}-{sect}.ma"
 
-                                    # ✅ Anti-doublon : ignore si l'établissement (nom + ville)
-                                    #     existe déjà, quelle que soit la source (Google Places,
-                                    #     OpenAI...) et même si l'email diffère.
                                     exists = conn.execute(text("""
                                         SELECT 1 FROM prospects
                                         WHERE LOWER(TRIM(nom)) = LOWER(TRIM(:nom))
@@ -984,8 +985,6 @@ Génère maintenant {secteur}s à {ville}:"""
                                     })
                                     inserted = (res.rowcount or 0) > 0
                                     if inserted:
-                                        # commit immédiat : la pré-vérif détectera ce même
-                                        # email s'il réapparaît plus loin dans la réponse.
                                         conn.commit()
                                     with lock:
                                         job["processed"] += 1
@@ -1042,7 +1041,6 @@ def lancer_scraper_env(current_user = Depends(get_current_user)):
         return {"status": "error", "message": "❌ GOOGLE_API_KEY absente du fichier .env"}
 
     print(f"\n{'='*60}\n🌍 SCRAPER (API .env)\n{'='*60}")
-    # Pas de --api-key => le scraper utilisera GOOGLE_API_KEY du .env
     demarre = _demarrer_job("env", ["--user-id", str(user_id)])
 
     if not demarre:
@@ -1056,7 +1054,6 @@ def lancer_scraper_tout(current_user = Depends(get_current_user)):
     """Page 'Outils' : lance le scraper avec l'API Google Places configurée dans Settings."""
     user_id = current_user.get("user_id")
 
-    # ✅ ÉTAPE 1: Récupère l'API Google Places configurée dans Settings
     try:
         with engine.connect() as conn:
             result = conn.execute(text("""
@@ -1071,7 +1068,6 @@ def lancer_scraper_tout(current_user = Depends(get_current_user)):
 
             encrypted_key = dict(row._mapping)['api_key']
 
-            # ✅ ÉTAPE 2: Décrypte la clé
             try:
                 decrypted_key = CIPHER_SUITE.decrypt(encrypted_key.encode()).decode()
             except Exception as e:
@@ -1081,7 +1077,6 @@ def lancer_scraper_tout(current_user = Depends(get_current_user)):
         print(f"Erreur récupération API: {e}")
         return {"status": "error", "message": f"❌ Erreur: {str(e)}"}
 
-    # ✅ ÉTAPE 3: Lance le scraper avec l'API de Settings (job indépendant "settings")
     print(f"\n{'='*60}\n🌍 SCRAPER (API Settings)\n{'='*60}")
     demarre = _demarrer_job("settings", ["--api-key", decrypted_key, "--user-id", str(user_id)])
 
@@ -1181,16 +1176,24 @@ def get_contacts_from_scraping(current_user = Depends(get_current_user)):
 def creer_campagne(nom: str, sujet: str, current_user = Depends(get_current_user)):
     try:
         with engine.connect() as conn:
-            conn.execute(text("""
+            result = conn.execute(text("""
                 INSERT INTO campagnes (nom, sujet, statut)
                 VALUES (:nom, :sujet, 'brouillon')
             """), {"nom": nom, "sujet": sujet})
+            
+            # Récupérer l'ID de la dernière insertion
+            campagne_id = result.lastrowid
+            
             conn.commit()
-            return {"message": "Campagne créée ✅"}
+            
+            # Retourner l'ID avec le message
+            return {
+                "id": campagne_id,
+                "message": "Campagne créée ✅"
+            }
     except Exception as e:
         print(f"Erreur creer_campagne: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/campagnes")
 def get_campagnes(current_user = Depends(get_current_user)):
     try:
@@ -1239,8 +1242,6 @@ def get_kpis_campagnes(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"Erreur KPIs campagnes: {e}")
         return {"total_campagnes": 0, "total_envoyes": 0, "total_ouverts": 0, "taux_ouverture": 0}
-
-# Au début du fichier, assure-toi d'avoir : from sqlalchemy import text
 
 @app.post("/campagnes/envoyer-selection")
 def envoyer_emails_selection(selection: SelectionEmails, current_user = Depends(get_current_user)):
@@ -1347,6 +1348,7 @@ def get_emails_envoyes(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"❌ /emails/envoyes: {e}")
         return []
+
 @app.get("/tracking/click")
 def track_click(tid: str):
     """Tracking par clic — fonctionne même si Gmail bloque les images"""
@@ -1363,6 +1365,7 @@ def track_click(tid: str):
         print(f"Tracking click error: {e}")
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="https://www.pmtravel.ma")
+
 @app.get("/tracking/open")
 def track_open(tid: str):
     """Pixel de tracking - enregistre l'ouverture"""
@@ -1379,7 +1382,6 @@ def track_open(tid: str):
                 {"tid": tid}
             )
             conn.commit()
-
     except Exception as e:
         print(f"Tracking error: {e}")
     from fastapi.responses import Response
@@ -1403,7 +1405,6 @@ def get_api_configs(current_user = Depends(get_current_user)):
                 r = dict(row._mapping)
                 apis[r['api_name']] = r['enabled'] == 1
 
-            # Retourner TOUTES les APIs, pas seulement google_places et openai
             return apis
             
     except Exception as e:
@@ -1441,13 +1442,192 @@ def save_smtp_config(config: SMTPConfig, current_user = Depends(get_current_user
 
 @app.post("/settings/smtp/test")
 async def test_smtp(config: SMTPConfig, current_user = Depends(get_current_user)):
-    """Teste la connexion SMTP"""
+    """Teste l'envoi d'email selon le provider choisi"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    
     try:
         test_email = os.getenv('TEST_EMAIL', 'chaimaaait2005@gmail.com')
-        return {"success": True, "message": f"✅ Email test envoyé à {test_email}!"}
+        user_id = current_user.get('user_id')
+        
+        sujet = "[TEST] Vérification configuration SMTP"
+        contenu = f"""
+Bonjour,
+
+Ceci est un email de test pour vérifier la configuration SMTP du CRM.
+
+Provider: {config.provider}
+Email expéditeur: {config.email}
+Date: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+
+Si vous recevez cet email, votre configuration est correcte !
+
+Cordialement,
+L'équipe PM Travel CRM
+"""
+        
+        success = False
+        
+        # ─────────────────────────────────────────
+        # SENDGRID (API REST)
+        # ─────────────────────────────────────────
+        if config.provider == 'sendgrid':
+            try:
+                import sendgrid
+                from sendgrid.helpers.mail import Mail
+                
+                # Utiliser la clé du .env si celle du frontend est invalide
+                api_key = config.password
+                if not api_key or not api_key.startswith('SG.'):
+                    print("⚠️ Clé API frontend invalide, utilisation de la clé du .env")
+                    api_key = os.getenv('SENDGRID_API_KEY')
+                
+                if not api_key:
+                    raise Exception("Aucune clé API SendGrid disponible")
+                
+                sg = sendgrid.SendGridAPIClient(api_key=api_key)
+                message = Mail(
+                    from_email=config.email,
+                    to_emails=test_email,
+                    subject=sujet,
+                    plain_text_content=contenu
+                )
+                response = sg.send(message)
+                success = 200 <= response.status_code < 300
+                
+                if success:
+                    print(f"✅ SendGrid: Email envoyé avec succès (status {response.status_code})")
+                else:
+                    raise Exception(f"Status {response.status_code}: {response.body}")
+                    
+            except Exception as e:
+                raise Exception(f"SendGrid error: {str(e)}")
+        
+        # ─────────────────────────────────────────
+        # GMAIL (SMTP avec mot de passe d'application)
+        # ─────────────────────────────────────────
+        elif config.provider == 'gmail':
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = config.email
+                msg['To'] = test_email
+                msg['Subject'] = sujet
+                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
+                
+                # Connexion Gmail
+                server = smtplib.SMTP('smtp.gmail.com', 587)
+                server.set_debuglevel(True)  # Pour debug
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(config.email, config.password)
+                server.send_message(msg)
+                server.quit()
+                success = True
+                print(f"✅ Gmail: Email envoyé avec succès à {test_email}")
+                
+            except smtplib.SMTPAuthenticationError:
+                raise Exception("Erreur d'authentification Gmail. Utilisez un mot de passe d'application (https://myaccount.google.com/apppasswords)")
+            except Exception as e:
+                raise Exception(f"Gmail error: {str(e)}")
+        
+        # ─────────────────────────────────────────
+        # HOSTINGER (SMTP SSL)
+        # ─────────────────────────────────────────
+        elif config.provider == 'hostinger':
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = config.email
+                msg['To'] = test_email
+                msg['Subject'] = sujet
+                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
+                
+                # Configuration Hostinger
+                smtp_host = config.host or 'smtp.hostinger.com'
+                smtp_port = config.port or 465
+                
+                print(f"📧 Connexion Hostinger: {smtp_host}:{smtp_port}")
+                
+                # Connexion SSL directe
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port)
+                server.login(config.email, config.password)
+                server.send_message(msg)
+                server.quit()
+                success = True
+                print(f"✅ Hostinger: Email envoyé avec succès à {test_email}")
+                
+            except smtplib.SMTPAuthenticationError:
+                raise Exception("Erreur d'authentification Hostinger. Vérifiez email/mot de passe")
+            except Exception as e:
+                raise Exception(f"Hostinger error: {str(e)}")
+        
+        # ─────────────────────────────────────────
+        # CUSTOM (Provider personnalisé)
+        # ─────────────────────────────────────────
+        elif config.provider == 'custom':
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = config.email
+                msg['To'] = test_email
+                msg['Subject'] = sujet
+                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
+                
+                if not config.host:
+                    raise Exception("Host requis pour un provider custom")
+                
+                # Connexion selon le port
+                if config.port == 465:
+                    server = smtplib.SMTP_SSL(config.host, config.port)
+                else:
+                    server = smtplib.SMTP(config.host, config.port or 587)
+                    server.starttls()
+                
+                server.login(config.email, config.password)
+                server.send_message(msg)
+                server.quit()
+                success = True
+                print(f"✅ Custom: Email envoyé avec succès à {test_email}")
+                
+            except Exception as e:
+                raise Exception(f"Custom SMTP error: {str(e)}")
+        
+        else:
+            raise Exception(f"Provider '{config.provider}' non supporté. Choix disponibles: sendgrid, gmail, hostinger, custom")
+        
+        # ─────────────────────────────────────────
+        # SAUVEGARDE DANS LA BASE DE DONNÉES
+        # ─────────────────────────────────────────
+        if success:
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    INSERT INTO emails_envoyes 
+                    (user_id, email_destinataire, sujet, contenu, statut, date_envoi)
+                    VALUES (:user_id, :email, :sujet, :contenu, 'envoyé', NOW())
+                """), {
+                    "user_id": user_id,
+                    "email": test_email,
+                    "sujet": sujet,
+                    "contenu": contenu
+                })
+                conn.commit()
+            
+            return {
+                "success": True, 
+                "message": f"✅ Email test envoyé avec {config.provider} à {test_email}!"
+            }
+        else:
+            raise Exception("L'envoi a échoué sans erreur spécifique")
+        
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"❌ Erreur auth SMTP: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Erreur d'authentification {config.provider}. Vérifiez email/mot de passe.")
+    except smtplib.SMTPException as e:
+        print(f"❌ Erreur SMTP: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Erreur SMTP {config.provider}: {str(e)}")
     except Exception as e:
-        print(f"Erreur test SMTP: {e}")
-        raise HTTPException(status_code=400, detail=f"❌ Erreur SMTP: {str(e)}")
+        print(f"❌ Erreur test SMTP: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Erreur {config.provider}: {str(e)}")
 
 @app.post("/settings/imap")
 def save_imap_config(config: IMAPConfig, current_user = Depends(get_current_user)):
@@ -1483,7 +1663,6 @@ def sync_emails(current_user = Depends(get_current_user)):
     """Synchronise les emails reçus via IMAP et les stocke dans emails_recus"""
     user_id = current_user.get('user_id')
     try:
-        # Récupérer la config IMAP
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT email, password, host, port, secure
@@ -1496,7 +1675,6 @@ def sync_emails(current_user = Depends(get_current_user)):
                 raise HTTPException(status_code=400, detail="IMAP non configuré. Configurez-le dans Settings.")
             cfg = dict(row._mapping)
 
-        # Décrypter le mot de passe
         try:
             password = CIPHER_SUITE.decrypt(cfg['password'].encode()).decode()
         except Exception:
@@ -1519,7 +1697,6 @@ def sync_emails(current_user = Depends(get_current_user)):
             return ' '.join(result)
 
         def get_body(msg):
-            """Extrait le corps texte et HTML du message"""
             text_body, html_body = '', ''
             if msg.is_multipart():
                 for part in msg.walk():
@@ -1552,7 +1729,6 @@ def sync_emails(current_user = Depends(get_current_user)):
                     pass
             return text_body, html_body
 
-        # Connexion IMAP
         host = cfg['host'] or 'imap.gmail.com'
         port = cfg['port'] or 993
         secure = cfg['secure']
@@ -1565,24 +1741,20 @@ def sync_emails(current_user = Depends(get_current_user)):
 
         imap.login(imap_email, password)
 
-        # Dossiers à scanner : INBOX + Spam (noms possibles selon le provider)
         from datetime import date, timedelta
         since_date = (date.today() - timedelta(days=30)).strftime('%d-%b-%Y')
 
-        # Lister tous les dossiers disponibles pour trouver le bon nom Spam
         _, folder_list = imap.list()
         available_folders = []
         for f in folder_list:
             try:
                 decoded = f.decode() if isinstance(f, bytes) else f
-                # Extraire le nom du dossier (dernier élément après le séparateur)
                 parts = decoded.split('"/"')
                 folder_name = parts[-1].strip().strip('"') if len(parts) > 1 else decoded.split()[-1].strip('"')
                 available_folders.append(folder_name)
             except Exception:
                 pass
 
-        # Noms possibles pour le dossier Spam selon Gmail / Outlook / Yahoo
         spam_candidates = [
             '[Gmail]/Spam', '[Gmail]/Junk', 'Spam', 'Junk', 'Junk Email',
             '[Google Mail]/Spam', 'INBOX.Spam', 'INBOX.Junk'
@@ -1613,7 +1785,7 @@ def sync_emails(current_user = Depends(get_current_user)):
                     msg_ids = messages[0].split()
                     print(f"📂 {folder} : {len(msg_ids)} emails trouvés")
 
-                    for num in msg_ids[-100:]:  # Max 100 par dossier
+                    for num in msg_ids[-100:]:
                         try:
                             status, data = imap.fetch(num, '(RFC822)')
                             if status != 'OK':
@@ -1625,20 +1797,17 @@ def sync_emails(current_user = Depends(get_current_user)):
                             if not message_id:
                                 continue
 
-                            # Vérifier si déjà importé
                             exists = conn.execute(text("""
                                 SELECT 1 FROM emails_recus WHERE message_id = :mid LIMIT 1
                             """), {"mid": message_id[:255]}).fetchone()
                             if exists:
                                 continue
 
-                            # Parser l'expéditeur
                             from_raw = decode_str(msg.get('From', ''))
                             match = re.search(r'<(.+?)>', from_raw)
                             expediteur_email = match.group(1) if match else from_raw.strip()
                             nom_expediteur = re.sub(r'<.+>', '', from_raw).strip().strip('"')
 
-                            # Ne garder que les réponses de prospects (pas ses propres emails)
                             if expediteur_email.lower() == imap_email.lower():
                                 continue
 
@@ -1646,7 +1815,6 @@ def sync_emails(current_user = Depends(get_current_user)):
                             in_reply_to = msg.get('In-Reply-To', '').strip()
                             text_body, html_body = get_body(msg)
 
-                            # Date de réception
                             try:
                                 date_rec = parsedate_to_datetime(msg.get('Date', ''))
                             except Exception:
@@ -1682,8 +1850,6 @@ def sync_emails(current_user = Depends(get_current_user)):
 
         imap.logout()
 
-        # Marquer comme 'répondu' uniquement le dernier email envoyé à chaque
-        # adresse qui a effectivement répondu — pas tous les emails de l'historique.
         with engine.connect() as conn:
             conn.execute(text("""
     UPDATE emails_envoyes ee
@@ -1743,15 +1909,10 @@ def get_emails_recus(current_user = Depends(get_current_user)):
 
 @app.get("/emails/conversations")
 def get_conversations(current_user = Depends(get_current_user)):
-    """
-    Retourne l'historique complet des échanges groupés par adresse email.
-    Chaque entrée contient : email, nom, nb_envoyes, nb_recus, dernier_message,
-    et la liste des messages (envoyés + reçus) triés par date.
-    """
+    """Retourne l'historique complet des échanges groupés par adresse email."""
     user_id = current_user.get('user_id')
     try:
         with engine.connect() as conn:
-            # Emails envoyés
             sent = conn.execute(text("""
                 SELECT 
                     e.id, e.email_destinataire AS email_contact,
@@ -1766,7 +1927,6 @@ def get_conversations(current_user = Depends(get_current_user)):
                 LIMIT 500
             """), {"uid": user_id}).fetchall()
 
-            # Emails reçus
             received = conn.execute(text("""
                 SELECT
                     id, email_expediteur AS email_contact,
@@ -1781,7 +1941,6 @@ def get_conversations(current_user = Depends(get_current_user)):
                 LIMIT 500
             """), {"uid": user_id}).fetchall()
 
-        # Regrouper par email_contact
         conversations = {}
 
         for row in sent:
@@ -1791,13 +1950,8 @@ def get_conversations(current_user = Depends(get_current_user)):
                 continue
             if email not in conversations:
                 conversations[email] = {
-                    'email': email,
-                    'nom': email,
-                    'messages': [],
-                    'nb_envoyes': 0,
-                    'nb_recus': 0,
-                    'dernier_message': None,
-                    'a_repondu': False
+                    'email': email, 'nom': email, 'messages': [],
+                    'nb_envoyes': 0, 'nb_recus': 0, 'dernier_message': None, 'a_repondu': False
                 }
             d['date_msg'] = str(d['date_msg']) if d.get('date_msg') else None
             conversations[email]['messages'].append(d)
@@ -1810,13 +1964,8 @@ def get_conversations(current_user = Depends(get_current_user)):
                 continue
             if email not in conversations:
                 conversations[email] = {
-                    'email': email,
-                    'nom': d.get('nom_contact') or email,
-                    'messages': [],
-                    'nb_envoyes': 0,
-                    'nb_recus': 0,
-                    'dernier_message': None,
-                    'a_repondu': False
+                    'email': email, 'nom': d.get('nom_contact') or email, 'messages': [],
+                    'nb_envoyes': 0, 'nb_recus': 0, 'dernier_message': None, 'a_repondu': False
                 }
             if d.get('nom_contact'):
                 conversations[email]['nom'] = d['nom_contact']
@@ -1825,7 +1974,6 @@ def get_conversations(current_user = Depends(get_current_user)):
             conversations[email]['nb_recus'] += 1
             conversations[email]['a_repondu'] = True
 
-        # Trier les messages dans chaque conversation + calculer dernier_message
         result_list = []
         for email, conv in conversations.items():
             conv['messages'].sort(key=lambda x: x.get('date_msg') or '', reverse=False)
@@ -1833,7 +1981,6 @@ def get_conversations(current_user = Depends(get_current_user)):
             conv['dernier_message'] = max(dates) if dates else None
             result_list.append(conv)
 
-        # Trier les conversations par dernier_message desc
         result_list.sort(key=lambda x: x.get('dernier_message') or '', reverse=True)
         return result_list
 
@@ -1844,15 +1991,10 @@ def get_conversations(current_user = Depends(get_current_user)):
 
 @app.post("/emails/corriger-statuts")
 def corriger_statuts_emails(current_user = Depends(get_current_user)):
-    """
-    Remet à 'ouvert' ou 'envoyé' les emails qui ont été marqués 'répondu' à tort
-    (tous les emails d'une adresse au lieu du dernier uniquement).
-    Conserve uniquement le dernier email envoyé à chaque adresse comme 'répondu'.
-    """
+    """Remet à 'ouvert' ou 'envoyé' les emails marqués 'répondu' à tort."""
     user_id = current_user.get('user_id')
     try:
         with engine.connect() as conn:
-            # 1. Récupérer les adresses qui ont vraiment répondu
             replied_addresses = conn.execute(text("""
                 SELECT DISTINCT LOWER(email_expediteur) as email
                 FROM emails_recus WHERE user_id = :uid
@@ -1860,7 +2002,6 @@ def corriger_statuts_emails(current_user = Depends(get_current_user)):
             replied_set = {r[0] for r in replied_addresses}
 
             if not replied_set:
-                # Personne n'a répondu : remettre tous les 'répondu' à leur vrai statut
                 conn.execute(text("""
     UPDATE emails_envoyes
     SET statut = CASE
@@ -1875,8 +2016,6 @@ def corriger_statuts_emails(current_user = Depends(get_current_user)):
                 params = {f'e{i}': e for i, e in enumerate(replied_set)}
                 params['uid'] = user_id
 
-                # 2. Pour chaque adresse ayant répondu, trouver le MAX(id) = dernier email envoyé
-                # Tous les autres emails envoyés à cette adresse reprennent leur vrai statut
                 conn.execute(text(f"""
                     UPDATE emails_envoyes ee
                     SET ee.statut = CASE
@@ -1936,148 +2075,168 @@ def get_sequences(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"Erreur get_sequences: {e}")
         return []
-class PublishRequest(BaseModel):
-    plateforme: str  # instagram, facebook, linkedin
+
+# ═══════════════════════════════════════════
+# SOCIAL - PUBLICATION
+# ═══════════════════════════════════════════
+
+@app.post("/social/posts/{post_id}/publish")
+def marquer_publie(post_id: int, current_user = Depends(get_current_user)):
+    """Marque un post comme publié sans appel API externe."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE posts_sociaux SET statut = 'publié' WHERE id = :id
+            """), {"id": post_id})
+            conn.commit()
+        return {"success": True, "message": f"Post {post_id} publié ✅"}
+    except Exception as e:
+        print(f"Erreur marquer_publie: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/social/posts/{post_id}/publier")
 def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_current_user)):
     """
-    Publie réellement un post sur la plateforme demandée.
-    Utilise les tokens stockés dans api_integrations.
+    Publie réellement un post sur Instagram, Facebook ou LinkedIn.
+    Lit les tokens depuis api_integrations (colonne config, format JSON).
     """
     try:
-        # 1. Récupérer le post depuis la base
+        user_id = current_user.get('user_id')
+
+        # --- Récupérer le post ---
         with engine.connect() as conn:
-            result = conn.execute(text("""
-                SELECT * FROM posts_sociaux WHERE id = :post_id
-            """), {"post_id": post_id})
-            post = result.fetchone()
-            if not post:
-                raise HTTPException(status_code=404, detail="Post non trouvé")
-            post_dict = dict(post._mapping)
-        
+            post = conn.execute(
+                text("SELECT * FROM posts_sociaux WHERE id = :post_id"),
+                {"post_id": post_id}
+            ).fetchone()
+        if not post:
+            raise HTTPException(404, "Post non trouvé")
+        post_dict = dict(post._mapping)
+
         if post_dict['statut'] != 'planifié':
-            raise HTTPException(status_code=400, detail="Post déjà publié ou non planifié")
-        
-        # 2. Récupérer le token d'accès pour la plateforme
+            raise HTTPException(400, f"Post déjà '{post_dict['statut']}' — publication annulée")
+
         platform = req.plateforme.lower()
-        token = None
-        with engine.connect() as conn:
-            res = conn.execute(text("""
-                SELECT api_key FROM api_integrations
-                WHERE api_name = :api_name AND enabled = 1
-            """), {"api_name": f"social_{platform}"})
-            row = res.fetchone()
-            if row:
-                encrypted = row[0]
-                decrypted = CIPHER_SUITE.decrypt(encrypted.encode()).decode()
-                token = decrypted
-        
-        if not token:
-            raise HTTPException(status_code=400, detail=f"Token non configuré pour {platform}")
-        
-        # 3. Publier selon la plateforme
-        contenu = post_dict['contenu']
-        hashtags = json.loads(post_dict['hashtags']) if post_dict['hashtags'] else []
-        full_caption = f"{contenu} {' '.join(hashtags)}"
-        image_url = post_dict['image_url']
-        
-        if platform == "instagram":
-            # Utiliser l'API Instagram Graph (compte business)
-            # Récupérer l'ID du compte Instagram depuis la config
-            with engine.connect() as conn:
-                cfg = conn.execute(text("""
-                    SELECT config FROM api_integrations WHERE api_name = 'instagram_business'
-                """)).fetchone()
-                if not cfg:
-                    raise HTTPException(400, "Configuration Instagram manquante")
-                config_insta = json.loads(cfg[0])
-                ig_account_id = config_insta.get("account_id")
-            
-            # Étape 1 : créer le conteneur média
-            media_url = f"https://graph.facebook.com/v18.0/{ig_account_id}/media"
-            media_resp = requests.post(media_url, data={
-                "image_url": image_url,
-                "caption": full_caption,
-                "access_token": token
-            })
-            if media_resp.status_code != 200:
-                raise Exception(f"Erreur création média: {media_resp.text}")
-            media_id = media_resp.json().get("id")
-            
-            # Étape 2 : publier
-            publish_url = f"https://graph.facebook.com/v18.0/{ig_account_id}/media_publish"
-            pub_resp = requests.post(publish_url, data={
-                "creation_id": media_id,
-                "access_token": token
-            })
-            if pub_resp.status_code != 200:
-                raise Exception(f"Erreur publication: {pub_resp.text}")
-        
-        elif platform == "facebook":
-            # Récupérer l'ID de la page
-            with engine.connect() as conn:
-                cfg = conn.execute(text("""
-                    SELECT config FROM api_integrations WHERE api_name = 'facebook_page'
-                """)).fetchone()
-                if not cfg:
-                    raise HTTPException(400, "Configuration Facebook manquante")
-                page_id = json.loads(cfg[0]).get("page_id")
-            
-            fb_url = f"https://graph.facebook.com/v18.0/{page_id}/feed"
-            fb_resp = requests.post(fb_url, data={
-                "message": full_caption,
-                "link": image_url,  # ou attached_media[] si image seule
-                "access_token": token
-            })
-            if fb_resp.status_code != 200:
-                raise Exception(f"Erreur Facebook: {fb_resp.text}")
-        
-        elif platform == "linkedin":
-            # API LinkedIn (nécessite un access token OAuth2)
-            linkedin_url = "https://api.linkedin.com/v2/ugcPosts"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            # Exemple de payload pour une image
-            payload = {
-                "author": f"urn:li:person:{os.getenv('LINKEDIN_PERSON_ID')}",
-                "lifecycleState": "PUBLISHED",
-                "specificContent": {
-                    "com.linkedin.ugc.ShareContent": {
-                        "shareCommentary": {"text": full_caption},
-                        "shareMediaCategory": "IMAGE",
-                        "media": [{"status": "READY", "originalUrl": image_url}]
-                    }
-                },
-                "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}
-            }
-            li_resp = requests.post(linkedin_url, json=payload, headers=headers)
-            if li_resp.status_code != 201:
-                raise Exception(f"Erreur LinkedIn: {li_resp.text}")
+
+        # --- Préparer le contenu ---
+        hashtags_raw = post_dict.get('hashtags')
+        if hashtags_raw:
+            try:
+                hashtags = json.loads(hashtags_raw)
+            except (json.JSONDecodeError, TypeError):
+                hashtags = []
         else:
-            raise HTTPException(400, f"Plateforme {platform} non supportée")
-        
-        # 4. Marquer le post comme publié dans la base
+            hashtags = []
+        full_caption = f"{post_dict['contenu']} {' '.join(hashtags)}".strip()
+        image_url = post_dict.get('image_url', '')
+
+        # --- Publier selon la plateforme ---
+        if platform == "instagram":
+            config = get_integration_config("social_instagram", user_id)
+            token = config.get("access_token")
+            ig_account_id = config.get("account_id")
+
+            if not token:
+                raise HTTPException(400, "access_token manquant dans social_instagram")
+            if not ig_account_id:
+                raise HTTPException(400, "account_id manquant dans social_instagram")
+
+            # Étape 1 : créer le conteneur média
+            media_resp = requests.post(
+                f"https://graph.facebook.com/v18.0/{ig_account_id}/media",
+                data={
+                    "image_url": image_url,
+                    "caption": full_caption,
+                    "access_token": token
+                },
+                timeout=15
+            )
+            if not media_resp.ok:
+                raise HTTPException(502, f"Erreur création média Instagram: {media_resp.text}")
+
+            resp_json = media_resp.json()
+            media_id = resp_json.get("id")
+            if not media_id:
+                raise HTTPException(502, f"Pas d'ID média retourné par Instagram: {media_resp.text}")
+
+            # Étape 2 : publier le conteneur
+            pub_resp = requests.post(
+                f"https://graph.facebook.com/v18.0/{ig_account_id}/media_publish",
+                data={
+                    "creation_id": media_id,
+                    "access_token": token
+                },
+                timeout=15
+            )
+            if not pub_resp.ok:
+                raise HTTPException(502, f"Erreur publication Instagram: {pub_resp.text}")
+
+        elif platform == "facebook":
+            # Récupère le token depuis facebook_page en priorité, sinon social_instagram
+            try:
+                fb_config = get_integration_config("facebook_page", user_id)
+                token = fb_config.get("access_token")
+                page_id = fb_config.get("page_id")
+            except HTTPException:
+                fb_config = {}
+                token = None
+                page_id = None
+
+            if not token:
+                ig_config = get_integration_config("social_instagram", user_id)
+                token = ig_config.get("access_token")
+
+            if not page_id:
+                # Chercher dans social_facebook
+                try:
+                    sf_config = get_integration_config("social_facebook", user_id)
+                    page_id = sf_config.get("page_id")
+                except HTTPException:
+                    pass
+
+            if not token:
+                raise HTTPException(400, "access_token manquant pour Facebook")
+            if not page_id:
+                raise HTTPException(400, "page_id manquant pour Facebook")
+
+            fb_resp = requests.post(
+                f"https://graph.facebook.com/v18.0/{page_id}/feed",
+                data={
+                    "message": full_caption,
+                    "link": image_url,
+                    "access_token": token
+                },
+                timeout=15
+            )
+            if not fb_resp.ok:
+                raise HTTPException(502, f"Erreur publication Facebook: {fb_resp.text}")
+
+        elif platform == "linkedin":
+            raise HTTPException(501, "LinkedIn pas encore configuré")
+
+        else:
+            raise HTTPException(400, f"Plateforme '{platform}' non supportée")
+
+        # --- Marquer comme publié ---
         with engine.connect() as conn:
-            conn.execute(text("""
-                UPDATE posts_sociaux SET statut = 'publié' WHERE id = :post_id
-            """), {"post_id": post_id})
-            conn.execute(text("""
-                UPDATE calendrier_editorial SET statut = 'publié' WHERE post_id = :post_id
-            """), {"post_id": post_id})
+            conn.execute(
+                text("UPDATE posts_sociaux SET statut = 'publié' WHERE id = :id"),
+                {"id": post_id}
+            )
+            conn.execute(
+                text("UPDATE calendrier_editorial SET statut = 'publié' WHERE post_id = :id"),
+                {"id": post_id}
+            )
             conn.commit()
-        
-        return {
-            "success": True,
-            "message": f"Post {post_id} publié sur {platform}",
-            "post_id": post_id
-        }
-    
+
+        return {"success": True, "message": f"Post {post_id} publié sur {platform}"}
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Erreur publier_post: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, detail=str(e))
 
 # ═══════════════════════════════════════════
 # SOCIAL - GÉNÉRATION POST & CALENDRIER
@@ -2088,27 +2247,15 @@ def generer_post_endpoint(
     plateforme: str,
     theme: str,
     langue: str = "français",
-    current_user=Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     try:
         post = generer_post_complet(plateforme, theme, langue)
-
-        return JSONResponse(content={
-            "success": True,
-            "post": post
-        })
-
+        return JSONResponse(content={"success": True, "post": post})
     except Exception as e:
         print("❌ ERROR RAW:", repr(e))
         traceback.print_exc()
-
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "error": str(e)
-            }
-        )
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @app.get("/social/posts/planifies")
@@ -2125,16 +2272,15 @@ def get_posts_planifies(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"Erreur get_posts_planifies: {e}")
         return []
+
 @app.post("/settings/api")
 def save_api_config(config: APIConfigRequest, current_user = Depends(get_current_user)):
     """Sauvegarde une configuration API (Google Places, OpenAI, Instagram, Facebook, LinkedIn)"""
     try:
         user_id = current_user.get('user_id')
         
-        # Convertir la config en JSON
         config_json = json.dumps(config.config)
         
-        # Pour les clés API, les chiffrer
         api_key = None
         if 'api_key' in config.config:
             api_key = CIPHER_SUITE.encrypt(config.config['api_key'].encode()).decode()
@@ -2142,14 +2288,12 @@ def save_api_config(config: APIConfigRequest, current_user = Depends(get_current
             api_key = CIPHER_SUITE.encrypt(config.config['access_token'].encode()).decode()
         
         with engine.connect() as conn:
-            # Vérifier si l'API existe déjà
             exists = conn.execute(text("""
                 SELECT id FROM api_integrations 
                 WHERE user_id = :user_id AND api_name = :api_name
             """), {"user_id": user_id, "api_name": config.api_name}).fetchone()
             
             if exists:
-                # Mettre à jour
                 conn.execute(text("""
                     UPDATE api_integrations 
                     SET api_key = :api_key, config = :config, enabled = :enabled
@@ -2162,7 +2306,6 @@ def save_api_config(config: APIConfigRequest, current_user = Depends(get_current
                     "enabled": config.config.get('enabled', True)
                 })
             else:
-                # Insérer
                 conn.execute(text("""
                     INSERT INTO api_integrations (user_id, api_name, api_key, config, enabled)
                     VALUES (:user_id, :api_name, :api_key, :config, :enabled)
@@ -2181,6 +2324,7 @@ def save_api_config(config: APIConfigRequest, current_user = Depends(get_current
     except Exception as e:
         print(f"Erreur save_api_config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/social/themes")
 def get_themes(current_user = Depends(get_current_user)):
     try:
@@ -2188,8 +2332,9 @@ def get_themes(current_user = Depends(get_current_user)):
         return {"themes": list(THEMES_TOURISTIQUES.keys()), "details": THEMES_TOURISTIQUES}
     except Exception as e:
         return {"themes": [], "details": {}}
+
 @app.post("/social/calendrier/generer")
-def generer_calendrier_endpoint(current_user=Depends(get_current_user)):
+def generer_calendrier_endpoint(current_user = Depends(get_current_user)):
     """
     Génère un calendrier éditorial de 21 posts pour la semaine (3 posts/jour × 7 jours).
     """
@@ -2204,6 +2349,31 @@ def generer_calendrier_endpoint(current_user=Depends(get_current_user)):
         print(f"Erreur generer_calendrier_endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ═══════════════════════════════════════════
+# DEBUG (à retirer en production)
+# ═══════════════════════════════════════════
+
+@app.get("/social/debug/integrations")
+def debug_integrations(current_user = Depends(get_current_user)):
+    """
+    Vérifie l'état des intégrations API en base.
+    Utile pour diagnostiquer les erreurs de publication.
+    À désactiver en production.
+    """
+    user_id = current_user.get('user_id')
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT 
+                api_name,
+                enabled,
+                CASE WHEN api_key IS NULL THEN 'NULL' ELSE 'CHIFFRÉ' END as api_key_status,
+                CASE WHEN config IS NULL THEN 'NULL' ELSE config END as config,
+                user_id
+            FROM api_integrations
+            WHERE user_id = :uid OR user_id IS NULL
+            ORDER BY api_name
+        """), {"uid": user_id}).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 # ═══════════════════════════════════════════
 # START
