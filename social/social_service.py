@@ -303,31 +303,22 @@ def generer_calendrier_semaine():
 # ─────────────────────────────────────────
 
 def obtenir_theme_courant(plateforme):
+    themes = list(THEMES_TOURISTIQUES.keys())
     conn = connect_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT theme_index, themes_list FROM rotation_themes WHERE plateforme = %s", (plateforme,))
+            cursor.execute("SELECT theme_index FROM rotation_themes WHERE plateforme = %s", (plateforme,))
             result = cursor.fetchone()
             if not result:
-                cursor.execute("INSERT INTO rotation_themes (plateforme) VALUES (%s)", (plateforme,))
+                cursor.execute("INSERT INTO rotation_themes (plateforme, theme_index) VALUES (%s, 0)", (plateforme,))
                 conn.commit()
-                return list(THEMES_TOURISTIQUES.keys())[0]
+                return themes[0]
             
             theme_index = result[0]
-            themes_list = json.loads(result[1])
-            return themes_list[theme_index % len(themes_list)]
+            return themes[theme_index % len(themes)]
     finally:
         conn.close()
-
-def incrementer_theme_index(plateforme):
-    conn = connect_db()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("UPDATE rotation_themes SET theme_index = (theme_index + 1) %% 6 WHERE plateforme = %s", (plateforme,))
-            conn.commit()
-    finally:
-        conn.close()
-
+        
 def obtenir_position_rotation(plateforme):
     conn = connect_db()
     try:
