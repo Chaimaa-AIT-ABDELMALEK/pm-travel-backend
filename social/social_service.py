@@ -316,3 +316,24 @@ def obtenir_position_rotation(plateforme):
             return result[0] if result else 0
     finally:
         conn.close()
+def incrementer_theme_index(plateforme):
+    themes = list(THEMES_TOURISTIQUES.keys())
+    conn = connect_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT theme_index FROM rotation_themes WHERE plateforme = %s", (plateforme,))
+            result = cursor.fetchone()
+            if result:
+                new_index = (result[0] + 1) % len(themes)
+                cursor.execute(
+                    "UPDATE rotation_themes SET theme_index = %s WHERE plateforme = %s",
+                    (new_index, plateforme)
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO rotation_themes (plateforme, theme_index) VALUES (%s, 1)",
+                    (plateforme,)
+                )
+        conn.commit()
+    finally:
+        conn.close()
