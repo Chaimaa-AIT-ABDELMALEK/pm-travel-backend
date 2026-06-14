@@ -187,10 +187,9 @@ def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
     contenu_html = contenu.replace('\n', '<br>')
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" />'
     
-    # URL de clic trackée
     base_url = tracking_url.split('/tracking/open')[0]
     tid = tracking_url.split('tid=')[1]
-    cta_url = f"{base_url}/tracking/click?tid={tid}"
+    cta_url = f"{base_url}/r/{tid}"
 
     return f"""
     <!DOCTYPE html>
@@ -207,19 +206,15 @@ def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
                     <table width="600" cellpadding="0" cellspacing="0"
                         style="background:#ffffff; border-radius:8px; overflow:hidden;">
 
-                        <!-- HEADER -->
                         <tr>
                             <td style="background:#1D9E75; padding:30px 40px;">
-                                <h1 style="color:#ffffff; margin:0; font-size:22px;">
-                                    PM Travel Agency
-                                </h1>
+                                <h1 style="color:#ffffff; margin:0; font-size:22px;">PM Travel Agency</h1>
                                 <p style="color:#E1F5EE; margin:5px 0 0; font-size:14px;">
                                     Marrakech, Maroc — Tourisme & Partenariats
                                 </p>
                             </td>
                         </tr>
 
-                        <!-- CORPS -->
                         <tr>
                             <td style="padding:40px;">
                                 <p style="color:#333333; font-size:15px; line-height:1.7; margin:0;">
@@ -228,19 +223,17 @@ def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
                             </td>
                         </tr>
 
-                        <!-- BOUTON CTA TRACKÉ -->
                         <tr>
                             <td style="padding:20px 40px 30px; text-align:center;">
                                 <a href="{cta_url}"
                                    style="display:inline-block; background:#1D9E75; color:#ffffff;
                                           padding:14px 32px; border-radius:6px; font-size:15px;
                                           font-weight:bold; text-decoration:none;">
-                                       Voir nos offres →
+                                    Voir nos offres →
                                 </a>
                             </td>
                         </tr>
 
-                        <!-- SIGNATURE -->
                         <tr>
                             <td style="padding:0 40px 30px;">
                                 <table cellpadding="0" cellspacing="0">
@@ -261,17 +254,11 @@ def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
                             </td>
                         </tr>
 
-                        <!-- FOOTER -->
                         <tr>
-                            <td style="background:#f9f9f9; padding:20px 40px;
-                                border-top:1px solid #eee;">
+                            <td style="background:#f9f9f9; padding:20px 40px; border-top:1px solid #eee;">
                                 <p style="margin:0; font-size:11px; color:#999; text-align:center;">
                                     PM Travel Agency — Marrakech, Maroc<br>
-                                    Vous recevez cet email car votre établissement
-                                    correspond à nos critères de partenariat.<br>
-                                    <a href="#" style="color:#1D9E75; text-decoration:none;">
-                                        Se désinscrire
-                                    </a>
+                                    Vous recevez cet email car votre établissement correspond à nos critères de partenariat.
                                 </p>
                             </td>
                         </tr>
@@ -297,8 +284,8 @@ def envoyer_email_avec_tracking(conn, prospect, sujet, contenu_texte):
     tracking_id = str(uuid.uuid4())
     
     # 2. Construire l'URL de tracking
-    base_url = os.getenv('APP_BASE_URL', 'http://localhost:8000')
-    tracking_url = f"{base_url}/tracking/open?tid={tracking_id}"
+    base_url = os.getenv('APP_BASE_URL', 'https://www.pm-travelagency.com')
+    tracking_url = f"{base_url}"
     
     # 3. Générer le HTML avec le pixel
     html = construire_html_email_avec_tracking(contenu_texte, prospect['nom'], tracking_url)
@@ -457,14 +444,14 @@ def obtenir_tous_les_themes(plateforme):
     finally:
         conn.close()
         # Fonction d'envoi simple (sans tracking) pour rester compatible avec le code existant
-def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
+def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect, campagne_id=None, prospect_id=None):
     """
     Envoie un email via SendGrid avec tracking.
     Retourne True/False.
     """
-    try:
+    try: 
         tracking_id = str(uuid.uuid4())
-        base_url = os.getenv('APP_BASE_URL', 'http://localhost:8000')
+        base_url = os.getenv('APP_BASE_URL', 'http://127.0.0.1:8000')  # ← corrigé
         tracking_url = f"{base_url}/tracking/open?tid={tracking_id}"
 
         html = construire_html_email_avec_tracking(contenu_texte, nom_prospect, tracking_url)
@@ -490,7 +477,7 @@ def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
                         INSERT INTO emails_envoyes
                         (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut, date_envoi, tracking_id)
                         VALUES (%s, %s, %s, %s, %s, 'envoyé', NOW(), %s)
-                    """, (None, None, destinataire, sujet, contenu_texte, tracking_id))
+                    """, (campagne_id, prospect_id, destinataire, sujet, contenu_texte, tracking_id))
                 conn.commit()
                 conn.close()
                 print(f"✅ Email sauvegardé en base pour {destinataire}")

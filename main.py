@@ -1222,17 +1222,55 @@ def get_campagne(campagne_id: int, current_user = Depends(get_current_user)):
 @app.post("/campagnes/{campagne_id}/lancer")
 def lancer_campagne(campagne_id: int, current_user = Depends(get_current_user)):
     try:
+        from emails.email_service import generer_contenu_email, generer_sujet_email, envoyer_email
+        
         with engine.connect() as conn:
             prospects = conn.execute(text("""
                 SELECT * FROM prospects WHERE email_valide = 1 ORDER BY score DESC LIMIT 50
             """)).fetchall()
+            
             if not prospects:
                 return {"message": "Aucun prospect disponible", "envoyes": 0}
-            return {"message": "Campagne lancée ✅", "envoyes": len(prospects), "echecs": 0}
+
+        envoyes = 0
+        echecs = 0
+
+        for row in prospects:
+            prospect = dict(row._mapping)
+            try:
+                sujet = generer_sujet_email(prospect)
+                contenu = generer_contenu_email(prospect)
+                
+                succes = envoyer_email(
+                    destinataire=prospect['email'],
+                    sujet=sujet,
+                    contenu_texte=contenu,
+                    nom_prospect=prospect['nom'],
+                    campagne_id=campagne_id,
+                    prospect_id=prospect['id']
+                )
+                
+                if succes:
+                    envoyes += 1
+                    print(f"✅ Email envoyé à {prospect['email']}")
+                else:
+                    echecs += 1
+                    
+            except Exception as e:
+                print(f"❌ Erreur prospect {prospect.get('id')}: {e}")
+                echecs += 1
+
+        return {
+            "message": f"Campagne lancée ✅",
+            "campagne_id": campagne_id,
+            "envoyes": envoyes,
+            "echecs": echecs
+        }
+
     except Exception as e:
         print(f"Erreur lancer_campagne: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/campagnes/stats/kpis")
 def get_kpis_campagnes(current_user = Depends(get_current_user)):
     try:
@@ -1257,74 +1295,38 @@ def envoyer_emails_selection(selection: SelectionEmails, current_user = Depends(
         params = {f'id{i}': id for i, id in enumerate(selection.contact_ids)}
         prospects = conn.execute(query, params).fetchall()
 
-        for row in prospects:
-            prospect = dict(row._mapping)
-            if not prospect.get('email'):
-                print(f"⚠️ Prospect ID {prospect.get('id')} sans email, ignoré")
+    for row in prospects:
+        prospect = dict(row._mapping)
+        if not prospect.get('email'):
+            print(f"⚠️ Prospect ID {prospect.get('id')} sans email, ignoré")
+            echecs += 1
+            continue
+        try:
+            print(f"📝 Génération contenu pour {prospect['email']}")
+            contenu = generer_contenu_email(prospect)
+            sujet = f"Offre personnalisée pour {prospect['nom']}"
+            print(f"📤 Envoi à {prospect['email']}")
+            
+            succes = envoyer_email(
+                prospect['email'],
+                sujet,
+                contenu,
+                prospect['nom'],
+                campagne_id=None,
+                prospect_id=prospect['id']
+            )
+            
+            if succes:
+                envoyes += 1
+                print(f"   ✅ Succès, total = {envoyes}")
+            else:
                 echecs += 1
-                continue
-            try:
-                print(f"📝 Génération contenu pour {prospect['email']}")
-                contenu = generer_contenu_email(prospect)
-                sujet = f"Offre personnalisée pour {prospect['nom']}"
-                print(f"📤 Envoi à {prospect['email']}")
-                success = envoyer_email(prospect['email'], sujet, contenu, prospect['nom'])
-                if success:
-                    try:
-                        with engine.connect() as conn2:
-                            conn2.execute(text("""
-                                INSERT INTO emails_envoyes 
-                                (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut, date_envoi)
-                                VALUES (NULL, :prospect_id, :email, :sujet, :contenu, 'envoyé', NOW())
-                            """), {
-                                "prospect_id": prospect['id'],
-                                "email": prospect['email'],
-                                "sujet": sujet,
-                                "contenu": contenu
-                            })
-                            conn2.commit()
-                        print("   ✅ Email sauvegardé en base")
-                    except Exception as e:
-                        print(f"   ⚠️ Sauvegarde base échouée : {e}")
-                    envoyes += 1
-                    print(f"   ✅ Succès, total = {envoyes}")
-                else:
-                    echecs += 1
-                    print(f"   ❌ Échec, total = {echecs}")
-            except KeyError as e:
-                print(f"💥 Clé manquante : {e}")
-                echecs += 1
-            except Exception as e:
-                print(f"💥 Exception : {e}")
-                echecs += 1
+        except Exception as e:
+            print(f"💥 Exception : {e}")
+            echecs += 1
 
     return {"envoyes": envoyes, "echecs": echecs}
-
-@app.post("/emails/sauvegarder")
-def sauvegarder_email_endpoint(email_data: EmailEnvoyeModel, current_user = Depends(get_current_user)):
-    """Sauvegarde manuellement un email dans la table emails_envoyes"""
-    user_id = current_user.get('user_id')
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("""
-                INSERT INTO emails_envoyes
-                (user_id, campagne_id, email_destinataire, sujet, contenu, statut, date_envoi)
-                VALUES (:user_id, :campagne_id, :email, :sujet, :contenu, :statut, NOW())
-            """), {
-                "user_id": user_id,
-                "campagne_id": email_data.campagne_id,
-                "email": email_data.email_destinataire,
-                "sujet": email_data.sujet,
-                "contenu": email_data.contenu,
-                "statut": email_data.statut
-            })
-            conn.commit()
-        return {"message": "✅ Email sauvegardé"}
-    except Exception as e:
-        print(f"Erreur sauvegarder_email: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+    
 @app.get("/emails/envoyes")
 def get_emails_envoyes(current_user = Depends(get_current_user)):
     try:
@@ -1351,6 +1353,19 @@ def get_emails_envoyes(current_user = Depends(get_current_user)):
 
 @app.get("/tracking/click")
 def track_click(tid: str):
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE emails_envoyes 
+                SET statut = 'cliqué',
+                    date_ouverture = COALESCE(date_ouverture, NOW())
+                WHERE tracking_id = :tid
+            """), {"tid": tid})
+            conn.commit()
+    except Exception as e:
+        print(f"Tracking click error: {e}")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://www.pm-travelagency.com/")
     """Tracking par clic — fonctionne même si Gmail bloque les images"""
     try:
         with engine.connect() as conn:
@@ -1366,27 +1381,57 @@ def track_click(tid: str):
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="https://www.pmtravel.ma")
 
-@app.get("/tracking/open")
-def track_open(tid: str):
-    """Pixel de tracking - enregistre l'ouverture"""
+
+
+    """Track le CLIC (différent de l'ouverture)"""
     try:
         with engine.connect() as conn:
-            conn.execute(
-                text("""
-                    UPDATE emails_envoyes 
-                    SET date_ouverture = NOW(),
-                        statut = 'ouvert'
-                    WHERE tracking_id = :tid 
-                    AND date_ouverture IS NULL
-                """),
-                {"tid": tid}
-            )
+            conn.execute(text("""
+                UPDATE emails_envoyes 
+                SET statut = 'cliqué',
+                    date_ouverture = COALESCE(date_ouverture, NOW())
+                WHERE tracking_id = :tid
+            """), {"tid": tid})
             conn.commit()
     except Exception as e:
-        print(f"Tracking error: {e}")
+        print(f"Tracking click error: {e}")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://www.pm-travelagency.com/")
+
+@app.get("/tracking/open")
+def track_open(tid: str):
+    """Pixel tracking — détecte l'ouverture"""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE emails_envoyes 
+                SET statut = 'ouvert',
+                    date_ouverture = COALESCE(date_ouverture, NOW())
+                WHERE tracking_id = :tid
+                AND statut = 'envoyé'
+            """), {"tid": tid})
+            conn.commit()
+    except Exception as e:
+        print(f"Tracking open error: {e}")
     from fastapi.responses import Response
     pixel = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
     return Response(content=pixel, media_type="image/gif")
+
+@app.get("/r/{tid}")
+def redirect_track(tid: str):
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE emails_envoyes 
+                SET statut = 'cliqué',
+                    date_ouverture = COALESCE(date_ouverture, NOW())
+                WHERE tracking_id = :tid
+            """), {"tid": tid})
+            conn.commit()
+    except Exception as e:
+        print(f"Tracking click error: {e}")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://www.pm-travelagency.com/")
 
 @app.get("/settings/api/list")
 def get_api_configs(current_user = Depends(get_current_user)):
