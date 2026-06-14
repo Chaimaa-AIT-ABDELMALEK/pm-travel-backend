@@ -1676,14 +1676,19 @@ def sync_emails(current_user = Depends(get_current_user)):
             cfg = dict(row._mapping)
 
         try:
-            password = CIPHER_SUITE.decrypt(cfg['password'].encode()).decode()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Erreur décryption mot de passe IMAP.")
+            encrypted = cfg['password']
+            if isinstance(encrypted, str):
+                password = CIPHER_SUITE.decrypt(encrypted.encode()).decode()
+            else:
+                password = CIPHER_SUITE.decrypt(encrypted).decode()
+        except Exception as e:
+            print(f"Erreur décryption détaillée: {e}")
+            # Fallback: essayer de lire en clair (pour migration)
+            password = cfg['password'] if isinstance(cfg['password'], str) else str(cfg['password'])
 
         import imaplib
         import email as email_lib
         from email.header import decode_header
-
         def decode_str(s):
             if s is None:
                 return ''
@@ -2096,9 +2101,16 @@ def marquer_publie(post_id: int, current_user = Depends(get_current_user)):
 
 
 @app.post("/social/posts/{post_id}/publier")
-def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_current_user)):
+def publier_post(
+    post_id: int, 
+    plateforme: str = Body(...),
+    creation_id: Optional[str] = Body(None),
+    current_user = Depends(get_current_user)
+):
     """
     Publie réellement un post sur Instagram, Facebook ou LinkedIn.
+    - Pour Instagram: creation_id est requis (ID du média déjà créé)
+    - Pour Facebook/LinkedIn: creation_id est optionnel
     Lit les tokens depuis api_integrations (colonne config, format JSON).
     """
     try:
@@ -2117,7 +2129,7 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
         if post_dict['statut'] != 'planifié':
             raise HTTPException(400, f"Post déjà '{post_dict['statut']}' — publication annulée")
 
-        platform = req.plateforme.lower()
+        platform = plateforme.lower()
 
         # --- Préparer le contenu ---
         hashtags_raw = post_dict.get('hashtags')
@@ -2133,6 +2145,9 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
 
         # --- Publier selon la plateforme ---
         if platform == "instagram":
+            if not creation_id:
+                raise HTTPException(400, "creation_id requis pour Instagram. Veuillez d'abord créer le média.")
+
             config = get_integration_config("social_instagram", user_id)
             token = config.get("access_token")
             ig_account_id = config.get("account_id")
@@ -2142,29 +2157,10 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
             if not ig_account_id:
                 raise HTTPException(400, "account_id manquant dans social_instagram")
 
-            # Étape 1 : créer le conteneur média
-            media_resp = requests.post(
-                f"https://graph.facebook.com/v18.0/{ig_account_id}/media",
-                data={
-                    "image_url": image_url,
-                    "caption": full_caption,
-                    "access_token": token
-                },
-                timeout=15
-            )
-            if not media_resp.ok:
-                raise HTTPException(502, f"Erreur création média Instagram: {media_resp.text}")
-
-            resp_json = media_resp.json()
-            media_id = resp_json.get("id")
-            if not media_id:
-                raise HTTPException(502, f"Pas d'ID média retourné par Instagram: {media_resp.text}")
-
-            # Étape 2 : publier le conteneur
             pub_resp = requests.post(
                 f"https://graph.facebook.com/v18.0/{ig_account_id}/media_publish",
                 data={
-                    "creation_id": media_id,
+                    "creation_id": creation_id,
                     "access_token": token
                 },
                 timeout=15
@@ -2173,7 +2169,6 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
                 raise HTTPException(502, f"Erreur publication Instagram: {pub_resp.text}")
 
         elif platform == "facebook":
-            # Récupère le token depuis facebook_page en priorité, sinon social_instagram
             try:
                 fb_config = get_integration_config("facebook_page", user_id)
                 token = fb_config.get("access_token")
@@ -2188,7 +2183,6 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
                 token = ig_config.get("access_token")
 
             if not page_id:
-                # Chercher dans social_facebook
                 try:
                     sf_config = get_integration_config("social_facebook", user_id)
                     page_id = sf_config.get("page_id")
@@ -2204,16 +2198,51 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
                 f"https://graph.facebook.com/v18.0/{page_id}/feed",
                 data={
                     "message": full_caption,
-                    "link": image_url,
+                    "link": image_url if image_url else "",
                     "access_token": token
                 },
                 timeout=15
             )
             if not fb_resp.ok:
                 raise HTTPException(502, f"Erreur publication Facebook: {fb_resp.text}")
-
+        
         elif platform == "linkedin":
-            raise HTTPException(501, "LinkedIn pas encore configuré")
+            try:
+                li_config = get_integration_config("social_linkedin", user_id)
+                token = li_config.get("access_token")
+                person_id = li_config.get("person_id", "-4SnRwHF-b")
+            except HTTPException:
+                raise HTTPException(400, "Configuration LinkedIn manquante.")
+
+            if not token:
+                raise HTTPException(400, "access_token manquant pour LinkedIn")
+
+            linkedin_resp = requests.post(
+                "https://api.linkedin.com/v2/ugcPosts",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "X-Restli-Protocol-Version": "2.0.0"
+                },
+                json={
+                    "author": f"urn:li:person:{person_id}",
+                    "lifecycleState": "PUBLISHED",
+                    "specificContent": {
+                        "com.linkedin.ugc.ShareContent": {
+                            "shareCommentary": {
+                                "text": full_caption[:1300]
+                            },
+                            "shareMediaCategory": "NONE"
+                        }
+                    },
+                    "visibility": {
+                        "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
+                    }
+                },
+                timeout=15
+            )
+            if not linkedin_resp.ok:
+                raise HTTPException(502, f"Erreur publication LinkedIn: {linkedin_resp.text}")
 
         else:
             raise HTTPException(400, f"Plateforme '{platform}' non supportée")
@@ -2230,7 +2259,12 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
             )
             conn.commit()
 
-        return {"success": True, "message": f"Post {post_id} publié sur {platform}"}
+        return {
+            "success": True,
+            "message": f"Post {post_id} publié sur {platform}",
+            "post_id": post_id,
+            "plateforme": platform
+        }
 
     except HTTPException:
         raise
@@ -2238,6 +2272,7 @@ def publier_post(post_id: int, req: PublishRequest, current_user = Depends(get_c
         print(f"Erreur publier_post: {e}")
         raise HTTPException(500, detail=str(e))
 
+# ═══════════════════════════════════════════
 # ═══════════════════════════════════════════
 # SOCIAL - GÉNÉRATION POST & CALENDRIER
 # ═══════════════════════════════════════════

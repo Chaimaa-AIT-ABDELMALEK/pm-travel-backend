@@ -235,8 +235,11 @@ def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
                                    style="display:inline-block; background:#1D9E75; color:#ffffff;
                                           padding:14px 32px; border-radius:6px; font-size:15px;
                                           font-weight:bold; text-decoration:none;">
-                                    Voir nos offres →
-                                </a> 
+                                       Voir nos offres →
+                                </a>
+                            </td>
+                        </tr>
+
                         <!-- SIGNATURE -->
                         <tr>
                             <td style="padding:0 40px 30px;">
@@ -247,10 +250,10 @@ def construire_html_email_avec_tracking(contenu, nom_prospect, tracking_url):
                                                 Équipe PM Travel
                                             </p>
                                             <p style="margin:3px 0 0; font-size:13px; color:#666;">
-                                                contact@pmtravel.ma
+                                                travelpm27@gmail.com
                                             </p>
                                             <p style="margin:3px 0 0; font-size:13px; color:#666;">
-                                                +212 5XX-XXXXXX
+                                                06 66 20 76 81
                                             </p>
                                         </td>
                                     </tr>
@@ -456,22 +459,52 @@ def obtenir_tous_les_themes(plateforme):
         # Fonction d'envoi simple (sans tracking) pour rester compatible avec le code existant
 def envoyer_email(destinataire, sujet, contenu_texte, nom_prospect):
     """
-    Envoie un email simple (sans tracking) en créant une connexion temporaire.
+    Envoie un email via SendGrid avec tracking.
     Retourne True/False.
     """
-    # Créer une connexion temporaire
-    conn = connect_db()
     try:
-        # Créer un prospect factice avec les champs nécessaires
-        prospect = {
-            'id': 0,  # sera ignoré car l'insertion avec tracking_id n'utilise pas l'ID du prospect
-            'nom': nom_prospect,
-            'email': destinataire
-        }
-        # Utiliser votre fonction existante
-        return envoyer_email_avec_tracking(conn, prospect, sujet, contenu_texte)
+        tracking_id = str(uuid.uuid4())
+        base_url = os.getenv('APP_BASE_URL', 'http://localhost:8000')
+        tracking_url = f"{base_url}/tracking/open?tid={tracking_id}"
+
+        html = construire_html_email_avec_tracking(contenu_texte, nom_prospect, tracking_url)
+
+        from_email = os.getenv('SENDGRID_FROM_EMAIL')
+        print(f"📧 Envoi SendGrid: {from_email} → {destinataire}")
+
+        message = Mail(
+            from_email=from_email,
+            to_emails=destinataire,
+            subject=sujet,
+            html_content=html
+        )
+
+        response = sg_client.send(message)
+        print(f"✅ SendGrid status: {response.status_code}")
+
+        if 200 <= response.status_code < 300:
+            try:
+                conn = connect_db()
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        INSERT INTO emails_envoyes
+                        (campagne_id, prospect_id, email_destinataire, sujet, contenu, statut, date_envoi, tracking_id)
+                        VALUES (%s, %s, %s, %s, %s, 'envoyé', NOW(), %s)
+                    """, (None, None, destinataire, sujet, contenu_texte, tracking_id))
+                conn.commit()
+                conn.close()
+                print(f"✅ Email sauvegardé en base pour {destinataire}")
+            except Exception as db_err:
+                print(f"⚠️ Sauvegarde DB échouée (email quand même envoyé): {db_err}")
+            return True
+        else:
+            print(f"❌ SendGrid échec: {response.status_code}")
+            return False
+
     except Exception as e:
-        print(f"Erreur envoyer_email: {e}")
+        print(f"❌ Erreur SendGrid: {type(e).__name__}: {e}")
+        if hasattr(e, 'body'):
+            print(f"❌ Détail erreur: {e.body}")
+        if hasattr(e, 'status_code'):
+            print(f"❌ Status code: {e.status_code}")
         return False
-    finally:
-        conn.close()
