@@ -1577,36 +1577,7 @@ L'équipe PM Travel CRM
             except Exception as e:
                 raise Exception(f"Gmail error: {str(e)}")
         
-        # ─────────────────────────────────────────
-        # HOSTINGER (SMTP SSL)
-        # ─────────────────────────────────────────
-        elif config.provider == 'hostinger':
-            try:
-                msg = MIMEMultipart()
-                msg['From'] = config.email
-                msg['To'] = test_email
-                msg['Subject'] = sujet
-                msg.attach(MIMEText(contenu, 'plain', 'utf-8'))
-                
-                # Configuration Hostinger
-                smtp_host = config.host or 'smtp.hostinger.com'
-                smtp_port = config.port or 465
-                
-                print(f"📧 Connexion Hostinger: {smtp_host}:{smtp_port}")
-                
-                # Connexion SSL directe
-                server = smtplib.SMTP_SSL(smtp_host, smtp_port)
-                server.login(config.email, config.password)
-                server.send_message(msg)
-                server.quit()
-                success = True
-                print(f"✅ Hostinger: Email envoyé avec succès à {test_email}")
-                
-            except smtplib.SMTPAuthenticationError:
-                raise Exception("Erreur d'authentification Hostinger. Vérifiez email/mot de passe")
-            except Exception as e:
-                raise Exception(f"Hostinger error: {str(e)}")
-        
+    
         # ─────────────────────────────────────────
         # CUSTOM (Provider personnalisé)
         # ─────────────────────────────────────────
@@ -1638,7 +1609,7 @@ L'équipe PM Travel CRM
                 raise Exception(f"Custom SMTP error: {str(e)}")
         
         else:
-            raise Exception(f"Provider '{config.provider}' non supporté. Choix disponibles: sendgrid, gmail, hostinger, custom")
+            raise Exception(f"Provider '{config.provider}' non supporté. Choix disponibles: sendgrid, gmail, custom")
         
         # ─────────────────────────────────────────
         # SAUVEGARDE DANS LA BASE DE DONNÉES
