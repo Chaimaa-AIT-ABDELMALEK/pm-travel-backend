@@ -292,14 +292,6 @@ class IMAPConfig(BaseModel):
 class APIConfigRequest(BaseModel):
     api_name: str
     config: dict
-
-class EmailEnvoyeModel(BaseModel):
-    campagne_id: Optional[int] = None
-    email_destinataire: str
-    sujet: str
-    contenu: str
-    statut: str = 'envoyé'
-
 class PublishRequest(BaseModel):
     plateforme: str  # instagram, facebook, linkedin
 
@@ -343,25 +335,40 @@ def verify_token(token):
     try:
         payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
+    except jwt.ExpiredSignatureError:
+        print("❌ Token expiré")
+        return None
+    except jwt.InvalidTokenError as e:
+        print(f"❌ Token invalide: {e}")
+        return None
     except Exception as e:
-        print(f"Erreur token: {e}")
+        print(f"❌ Erreur token: {e}")
         return None
 
 def get_current_user(authorization: str = Header(None)):
     if not authorization:
-        raise HTTPException(status_code=401, detail="No token")
+        print("❌ Pas de token dans le header")
+        raise HTTPException(status_code=401, detail="No token provided")
 
     parts = authorization.split(" ")
 
     if len(parts) != 2 or parts[0].lower() != "bearer":
+        print("❌ Format de token invalide")
         raise HTTPException(status_code=401, detail="Invalid token format")
 
     token = parts[1]
+    
+    if not token:
+        print("❌ Token vide")
+        raise HTTPException(status_code=401, detail="Empty token")
+
     payload = verify_token(token)
 
     if not payload:
+        print("❌ Token invalide ou expiré")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    print(f"✅ Token valide: user_id={payload.get('user_id')}")
     return payload
 
 def require_role(required_role: str):
@@ -415,7 +422,35 @@ def get_integration_config(api_name: str, user_id: int = None) -> dict:
 # ═══════════════════════════════════════════
 # AUTH
 # ═══════════════════════════════════════════
-
+class EmailEnvoyeModel(BaseModel):
+    campagne_id: Optional[int] = None
+    email_destinataire: str
+    sujet: str
+    contenu: str
+    statut: str = 'envoyé'
+@app.post("/emails/sauvegarder")
+def sauvegarder_email_endpoint(email_data: EmailEnvoyeModel, current_user = Depends(get_current_user)):
+    """Sauvegarde manuellement un email dans la table emails_envoyes"""
+    user_id = current_user.get('user_id')
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO emails_envoyes
+                (user_id, campagne_id, email_destinataire, sujet, contenu, statut, date_envoi)
+                VALUES (:user_id, :campagne_id, :email, :sujet, :contenu, :statut, NOW())
+            """), {
+                "user_id": user_id,
+                "campagne_id": email_data.campagne_id,
+                "email": email_data.email_destinataire,
+                "sujet": email_data.sujet,
+                "contenu": email_data.contenu,
+                "statut": email_data.statut
+            })
+            conn.commit()
+        return {"message": "✅ Email sauvegardé"}
+    except Exception as e:
+        print(f"Erreur sauvegarder_email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/auth/login")
 def login(username: str, password: str):
     user = get_user_by_username(username)
@@ -852,31 +887,58 @@ def _annuler_job(job_key):
 
 @app.post("/scraper/lancer-openai-web-search")
 def lancer_scraper_openai_web_search(current_user = Depends(get_current_user)):
-    """Page 'Outils' : scraper basé sur OpenAI."""
+    """Page 'Outils' : scraper basé sur OpenAI (utilise la clé la plus récente)."""
     user_id = current_user.get("user_id")
 
     try:
         with engine.connect() as conn:
+            # 🔥 Récupère la clé OpenAI la plus récente (même sans enabled = 1)
             result = conn.execute(text("""
-                SELECT api_key FROM api_integrations 
-                WHERE user_id = :user_id AND api_name = 'openai' AND enabled = 1
+                SELECT api_key, config, enabled
+                FROM api_integrations 
+                WHERE user_id = :user_id AND api_name = 'openai'
+                ORDER BY id DESC
                 LIMIT 1
             """), {"user_id": user_id})
 
             row = result.fetchone()
+            
+            # Fallback: chercher une clé activée si aucune trouvée
+            if not row:
+                result = conn.execute(text("""
+                    SELECT api_key, config, enabled
+                    FROM api_integrations 
+                    WHERE user_id = :user_id AND api_name = 'openai' AND enabled = 1
+                    LIMIT 1
+                """), {"user_id": user_id})
+                row = result.fetchone()
+            
             if not row:
                 return {"status": "error", "message": "❌ OpenAI API non configurée dans Settings"}
 
-            encrypted_key = dict(row._mapping)['api_key']
+            row_dict = dict(row._mapping)
+            encrypted_key = row_dict['api_key']
 
             try:
                 openai_key = CIPHER_SUITE.decrypt(encrypted_key.encode()).decode()
             except Exception as e:
                 print(f"Erreur décryption: {e}")
                 return {"status": "error", "message": "❌ Clé API illisible. Ré-enregistrez votre clé dans Settings puis relancez."}
+                
     except Exception as e:
         print(f"Erreur récupération API: {e}")
         return {"status": "error", "message": f"❌ Erreur: {str(e)}"}
+
+    print(f"\n{'='*60}\n🤖 SCRAPER OPENAI - Clé utilisée: {openai_key[:10]}...\n{'='*60}")
+    
+    # ❗ Mettre à jour enabled = 1 pour cette clé
+    with engine.connect() as conn:
+        conn.execute(text("""
+            UPDATE api_integrations 
+            SET enabled = 1
+            WHERE user_id = :user_id AND api_name = 'openai' AND api_key = :api_key
+        """), {"user_id": user_id, "api_key": encrypted_key})
+        conn.commit()
 
     job = SCRAPER_JOBS["openai"]
     lock = SCRAPER_LOCKS["openai"]
@@ -1031,7 +1093,6 @@ Génère maintenant {secteur}s à {ville}:"""
     thread.start()
 
     return {"status": "started", "message": "✅ Scraping OpenAI Web Search lancé! Recherche en cours..."}
-
 @app.post("/scraper/lancer-env")
 def lancer_scraper_env(current_user = Depends(get_current_user)):
     """Page 'Scraping' : lance le scraper avec l'API du fichier .env (GOOGLE_API_KEY)."""
@@ -1056,35 +1117,61 @@ def lancer_scraper_tout(current_user = Depends(get_current_user)):
 
     try:
         with engine.connect() as conn:
+            # 🔥 Récupère la clé la plus récente (même sans enabled = 1)
             result = conn.execute(text("""
-                SELECT api_key FROM api_integrations 
-                WHERE user_id = :user_id AND api_name = 'google_places' AND enabled = 1
+                SELECT api_key, config, enabled, created_at
+                FROM api_integrations 
+                WHERE user_id = :user_id AND api_name = 'google_places'
+                ORDER BY id DESC
                 LIMIT 1
             """), {"user_id": user_id})
 
             row = result.fetchone()
+            
+            # Si aucune clé trouvée, essayer avec enabled = 1
+            if not row:
+                result = conn.execute(text("""
+                    SELECT api_key, config, enabled, created_at
+                    FROM api_integrations 
+                    WHERE user_id = :user_id AND api_name = 'google_places' AND enabled = 1
+                    LIMIT 1
+                """), {"user_id": user_id})
+                row = result.fetchone()
+            
             if not row:
                 return {"status": "error", "message": "❌ Google Places API non configurée dans Settings"}
 
-            encrypted_key = dict(row._mapping)['api_key']
+            row_dict = dict(row._mapping)
+            encrypted_key = row_dict['api_key']
+            enabled = row_dict.get('enabled', True)
 
             try:
                 decrypted_key = CIPHER_SUITE.decrypt(encrypted_key.encode()).decode()
             except Exception as e:
                 print(f"Erreur décryption: {e}")
                 return {"status": "error", "message": "❌ Clé API illisible. Ré-enregistrez votre clé dans Settings puis relancez."}
+                
     except Exception as e:
         print(f"Erreur récupération API: {e}")
         return {"status": "error", "message": f"❌ Erreur: {str(e)}"}
 
-    print(f"\n{'='*60}\n🌍 SCRAPER (API Settings)\n{'='*60}")
+    print(f"\n{'='*60}\n🌍 SCRAPER (API Settings) - Clé utilisée: {decrypted_key[:10]}...\n{'='*60}")
+    
+    # ❗ Mettre à jour enabled = 1 pour cette clé
+    with engine.connect() as conn:
+        conn.execute(text("""
+            UPDATE api_integrations 
+            SET enabled = 1
+            WHERE user_id = :user_id AND api_name = 'google_places' AND api_key = :api_key
+        """), {"user_id": user_id, "api_key": encrypted_key})
+        conn.commit()
+
     demarre = _demarrer_job("settings", ["--api-key", decrypted_key, "--user-id", str(user_id)])
 
     if not demarre:
         return {"status": "already_running", "message": "Un scraping (Settings) est déjà en cours."}
 
     return {"status": "started", "message": "✅ Scraping lancé avec l'API configurée dans Settings !"}
-
 @app.post("/scraper/lancer-streaming")
 def lancer_scraper_cible(sector: str = Query(...), city: str = Query(...), current_user = Depends(get_current_user)):
     print(f"\n{'='*60}\n🕷️ SCRAPER CIBLE: {sector} à {city} (tâche de fond)\n{'='*60}")
