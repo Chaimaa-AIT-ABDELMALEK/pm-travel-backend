@@ -2403,7 +2403,7 @@ def get_posts_planifies(current_user = Depends(get_current_user)):
             result = conn.execute(text("""
                 SELECT * FROM posts_sociaux
                 WHERE statut = 'planifié'
-                AND date_publication <= NOW()
+                -- AND date_publication <= NOW()  ← COMMENTÉ
                 ORDER BY date_publication ASC
             """))
             return [dict(row._mapping) for row in result.fetchall()]
