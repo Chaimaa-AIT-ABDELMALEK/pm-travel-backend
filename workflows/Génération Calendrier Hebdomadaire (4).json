@@ -43,21 +43,6 @@
       ],
       "id": "d77b6472-da30-4b81-988b-9b644a129f7b",
       "name": "HTTP Request"
-    },
-    {
-      "parameters": {
-        "amount": 10,
-        "unit": "minutes"
-      },
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [
-        0,
-        -16
-      ],
-      "id": "151629a7-e78b-4ad1-9c67-90441075fe32",
-      "name": "Wait",
-      "webhookId": "bd674553-73ee-42a0-8476-c02b9d784049"
     }
   ],
   "pinData": {},
@@ -75,17 +60,6 @@
     },
     "HTTP Request": {
       "main": [
-        [
-          {
-            "node": "Wait",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait": {
-      "main": [
         []
       ]
     }
@@ -95,7 +69,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "6dcf7995-8d2c-4882-a223-b38bfb2ca359",
+  "versionId": "970e4721-bcd5-4fb4-98ae-73526e2880e7",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },

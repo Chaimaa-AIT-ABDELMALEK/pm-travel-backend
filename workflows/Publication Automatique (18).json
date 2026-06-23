@@ -182,8 +182,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        432,
-        -224
+        448,
+        -432
       ],
       "id": "adfcb5c4-abed-4b5f-82c6-6962ac7dafbe",
       "name": "Switch",
@@ -191,13 +191,31 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer AQWJO2c8CIc_FcjIsjr-r-CJXmBuVI_ZYgVL_vP5PvdHpm6SOBtDmGDY4V1SiVeesXKee6bzOOszUSxoRcooE5p1HnVPWbX-a3hTkXmt2tPSC6-H-q_F6jqTdOEqnrX4X5Dsb3IOjcduRh8r4ou0ABTbWS4xvm8-pFPLlsM-utf4K1fVWgTTOXASUTGIwWY6A5F_PG_ugnDLWa04Zf4UV0NHYdoLvcC_dN3Js9dAQt671ST1jvqETCXOOOMg0iZN8oxm1R0ihY9-0M0wb4VfRU4KowoCWJU1ouxzQ9ZrC4NbjuYGoqF5ZlNmCQ5HUIywZ7upuRFssUJ6F0wdFdPal_E-wXBywQ"
+            },
+            {
+              "name": "LinkedIn-Version",
+              "value": "202402"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"author\": \"urn:li:person:-4SnRwHF-b\", \"lifecycleState\": \"PUBLISHED\", \"specificContent\": { \"com.linkedin.ugc.ShareContent\": { \"shareCommentary\": { \"text\": \"{{$json.contenu}}\" }, \"shareMediaCategory\": \"NONE\" } }, \"visibility\": { \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\" } }",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        976,
-        -32
+        1008,
+        -96
       ],
       "id": "aa194b33-2db2-4602-8cf9-d9f055f9ce85",
       "name": "HTTP Request4"
@@ -205,7 +223,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://graph.facebook.com/v18.0/{{17841407339350115}}/media",
+        "url": "https://graph.facebook.com/v18.0/1141088079088139/feed",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -216,13 +234,8 @@
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "value": "={    \n\"image_url\": \"{{ $json.image_url }}\",     \n\"caption\": \"{{ $json.contenu }} {{ $json.hashtags }}\"  \n} "
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": \"{{ $json.contenu }}\",\n  \"link\": \"{{ $json.image_url }}\"\n}",
         "options": {
           "response": {
             "response": {
@@ -234,7 +247,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        784,
+        1200,
         -288
       ],
       "id": "cbf95cf6-86c6-4d46-a0e3-7c84c1b63ac9",
@@ -273,7 +286,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        768,
+        976,
         -480
       ],
       "id": "7aab0649-72f2-46ab-b4c1-541232927762",
@@ -295,35 +308,117 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://graph.facebook.com/v18.0/17841407339350115/media_publish",
+        "url": "=http://127.0.0.1:8000/social/posts/{{$json.db_post_id}}/publier",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer EAAXfN644VPoBRsgM6GFBfYDG5EbdRrZAzcyB482SJqQUPkV0RAG69ROZB0luhZAOjGi2af98DqOhpvCEX8MmNvS8iAv0QkUTZCB3lMRMZCbsLY67jQ8cbZAEifbCnSe2l6MNeNYbbepblZB8CXQsZA5w5XI9e0QO5o2SGaazljYZBNS2rwIaGk5DIh8Bs3XtM1aZAnKG838Hl7"
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
             }
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "creation_id",
-              "value": "={{ $json.id }}"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"plateforme\": \"{{$json.plateforme}}\",\n  \"creation_id\": \"{{$json.creation_id}}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        976,
-        -464
+        1760,
+        -192
       ],
       "id": "66297306-3dd0-46b9-b232-1115cc84f547",
       "name": "HTTP Request1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        752,
+        -464
+      ],
+      "id": "4581f9c4-0294-4a2e-82d6-c7f90aca9b07",
+      "name": "Wait",
+      "webhookId": "844ebd25-2bad-4e29-b9dd-5c6e637b203b"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        -288
+      ],
+      "id": "4588ed1b-65dd-4a59-8bc2-585f62e5a015",
+      "name": "Wait1",
+      "webhookId": "eca05a59-3e46-4809-8843-7b15bdd192ef"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        528,
+        -96
+      ],
+      "id": "8637d2b2-a46f-43ca-9169-2c75e5e6f026",
+      "name": "Wait2",
+      "webhookId": "7a18bae6-2b98-44f3-9ef1-341623261f24"
+    },
+    {
+      "parameters": {
+        "jsCode": "const instagramData = $json;\nconst waitData = $('Wait').first().json;\n\nreturn [{\n  json: {\n    db_post_id: waitData.id,\n    plateforme: 'instagram',\n    creation_id: String(instagramData.id)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        -448
+      ],
+      "id": "2b3eb2b9-aef6-497c-b65e-7411778f5436",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const waitData = $('Wait1').first().json;\n\nreturn [{\n  json: {\n    db_post_id: waitData.id,\n    plateforme: 'facebook'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -240
+      ],
+      "id": "749afdb4-cdd2-431d-9aca-1e9f03438478",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const waitData = $('Wait2').first().json;\n\n// Nettoyer le contenu pour éviter les caractères de contrôle\nconst contenu = (waitData.contenu || '').replace(/[\\x00-\\x1F\\x7F]/g, ' ').trim();\n\nreturn [{\n  json: {\n    db_post_id: waitData.id,\n    plateforme: 'linkedin',\n    contenu: contenu\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -96
+      ],
+      "id": "f664543b-be89-45a0-9be0-c1f46b2d68de",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Wait2').first().json;\n\n// Nettoyer complètement le contenu - enlever tous les caractères spéciaux\nlet cleanContent = (data.contenu || '')\n  .replace(/\\n/g, ' ')      // Remplacer les retours à la ligne par des espaces\n  .replace(/\\r/g, ' ')      // Remplacer les retours chariot\n  .replace(/\\t/g, ' ')      // Remplacer les tabulations\n  .replace(/[^\\x20-\\x7E]/g, '') // Enlever les caractères non ASCII\n  .trim();\n\n// Ajouter un identifiant unique\nconst timestamp = Date.now();\nconst finalContent = cleanContent + ` #PMTravel_${timestamp}`;\n\nreturn [{\n  json: {\n    id: data.id,\n    plateforme: data.plateforme,\n    contenu: finalContent\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        -96
+      ],
+      "id": "2cb98e10-718c-4bd7-82ae-5d0b6c406284",
+      "name": "Code in JavaScript4"
     }
   ],
   "pinData": {},
@@ -384,21 +479,21 @@
       "main": [
         [
           {
-            "node": "HTTP Request2",
+            "node": "Wait",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "HTTP Request3",
+            "node": "Wait1",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "HTTP Request4",
+            "node": "Wait2",
             "type": "main",
             "index": 0
           }
@@ -420,7 +515,106 @@
       "main": [
         [
           {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
             "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request4",
             "type": "main",
             "index": 0
           }
@@ -433,7 +627,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "2619e284-788b-4c73-a95f-46d63fa00559",
+  "versionId": "804c3673-febd-4f4c-968f-da35a6ad6d65",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },

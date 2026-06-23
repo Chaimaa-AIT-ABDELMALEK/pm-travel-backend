@@ -23,7 +23,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://127.0.0.1:8000/scraper/lancer",
+        "url": "http://127.0.0.1:8000/scraper/lancer-env",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -46,7 +46,7 @@
     },
     {
       "parameters": {
-        "amount": 30
+        "amount": 1
       },
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -61,6 +61,15 @@
     {
       "parameters": {
         "url": "http://127.0.1:8000/prospects/stats/kpis",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -108,6 +117,15 @@
     {
       "parameters": {
         "url": "http://127.0.1:8000/prospects",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE4MTI3NTExMTl9.SnRBm7gQqDv0z20GEMSNx7rABz6Add31IhPS_gyYIBo"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -183,7 +201,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "ab3d2f54-150f-48db-aaff-d5c00c7b35bb",
+  "versionId": "c968bad1-9745-4d72-9eaa-d4e5eef82c71",
   "meta": {
     "instanceId": "5fa691713323041e19a47078381448459dddd71c7c92c977dee7ea13e36e3c6d"
   },

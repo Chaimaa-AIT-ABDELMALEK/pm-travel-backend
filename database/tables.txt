@@ -1,0 +1,142 @@
++----------------------+--------------------+-----------+-------------+------------+-------------------+-----------------------------------------------+
+| TABLE_NAME           | COLUMN_NAME        | DATA_TYPE | IS_NULLABLE | COLUMN_KEY | COLUMN_DEFAULT    | EXTRA                                         |
++----------------------+--------------------+-----------+-------------+------------+-------------------+-----------------------------------------------+
+| api_integrations     | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| api_integrations     | user_id            | int       | NO          | MUL        | NULL              |                                               |
+| api_integrations     | api_name           | varchar   | YES         |            | NULL              |                                               |
+| api_integrations     | api_key            | text      | YES         |            | NULL              |                                               |
+| api_integrations     | config             | text      | YES         |            | NULL              |                                               |
+| api_integrations     | enabled            | tinyint   | YES         |            | 0                 |                                               |
+| api_integrations     | date_creation      | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| api_integrations     | created_at         | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| calendrier_editorial | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| calendrier_editorial | post_id            | bigint    | YES         | MUL        | NULL              |                                               |
+| calendrier_editorial | date_planifiee     | datetime  | NO          |            | NULL              |                                               |
+| calendrier_editorial | plateforme         | varchar   | YES         |            | NULL              |                                               |
+| calendrier_editorial | statut             | enum      | YES         |            | planifié          |                                               |
+| campagnes            | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| campagnes            | nom                | varchar   | YES         |            | NULL              |                                               |
+| campagnes            | sujet              | varchar   | YES         |            | NULL              |                                               |
+| campagnes            | statut             | enum      | YES         |            | brouillon         |                                               |
+| campagnes            | date_creation      | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| campagnes            | date_envoi         | datetime  | YES         |            | NULL              |                                               |
+| campagnes            | total_envoyes      | int       | YES         |            | 0                 |                                               |
+| campagnes            | total_ouverts      | int       | YES         |            | 0                 |                                               |
+| campagnes            | total_cliques      | int       | YES         |            | 0                 |                                               |
+| campagnes            | total_reponses     | int       | YES         |            | 0                 |                                               |
+| campagnes            | user_id            | int       | YES         |            | 1                 |                                               |
+| email_messages       | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| email_messages       | user_id            | int       | NO          |            | NULL              |                                               |
+| email_messages       | from_email         | varchar   | YES         |            | NULL              |                                               |
+| email_messages       | to_email           | varchar   | YES         |            | NULL              |                                               |
+| email_messages       | subject            | varchar   | YES         |            | NULL              |                                               |
+| email_messages       | body               | text      | YES         |            | NULL              |                                               |
+| email_messages       | message_id         | varchar   | YES         | UNI        | NULL              |                                               |
+| email_messages       | received_at        | datetime  | YES         |            | NULL              |                                               |
+| email_messages       | date_creation      | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| email_settings       | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| email_settings       | user_id            | int       | NO          | UNI        | NULL              |                                               |
+| email_settings       | provider           | varchar   | YES         |            | NULL              |                                               |
+| email_settings       | email              | varchar   | YES         |            | NULL              |                                               |
+| email_settings       | password           | text      | YES         |            | NULL              |                                               |
+| email_settings       | host               | varchar   | YES         |            | NULL              |                                               |
+| email_settings       | port               | int       | YES         |            | NULL              |                                               |
+| email_settings       | secure             | tinyint   | YES         |            | 1                 |                                               |
+| email_settings       | smtp_enabled       | tinyint   | YES         |            | 0                 |                                               |
+| email_settings       | imap_enabled       | tinyint   | YES         |            | 0                 |                                               |
+| email_settings       | sync_interval      | int       | YES         |            | 5                 |                                               |
+| email_settings       | date_creation      | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| emails_envoyes       | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| emails_envoyes       | campagne_id        | int       | YES         | MUL        | NULL              |                                               |
+| emails_envoyes       | prospect_id        | int       | YES         | MUL        | NULL              |                                               |
+| emails_envoyes       | email_destinataire | varchar   | YES         |            | NULL              |                                               |
+| emails_envoyes       | sujet              | varchar   | YES         |            | NULL              |                                               |
+| emails_envoyes       | contenu            | text      | YES         |            | NULL              |                                               |
+| emails_envoyes       | statut             | enum      | YES         |            | envoyé            |                                               |
+| emails_envoyes       | date_envoi         | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| emails_envoyes       | user_id            | int       | YES         | MUL        | NULL              |                                               |
+| emails_envoyes       | tracking_id        | varchar   | YES         |            | NULL              |                                               |
+| emails_envoyes       | date_ouverture     | datetime  | YES         |            | NULL              |                                               |
+| emails_recus         | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| emails_recus         | user_id            | int       | YES         | MUL        | NULL              |                                               |
+| emails_recus         | email_expediteur   | varchar   | NO          | MUL        | NULL              |                                               |
+| emails_recus         | nom_expediteur     | varchar   | YES         |            | NULL              |                                               |
+| emails_recus         | sujet              | varchar   | YES         |            | NULL              |                                               |
+| emails_recus         | contenu            | longtext  | YES         |            | NULL              |                                               |
+| emails_recus         | contenu_html       | longtext  | YES         |            | NULL              |                                               |
+| emails_recus         | message_id         | varchar   | YES         | UNI        | NULL              |                                               |
+| emails_recus         | in_reply_to        | varchar   | YES         |            | NULL              |                                               |
+| emails_recus         | date_reception     | datetime  | YES         | MUL        | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| emails_recus         | lu                 | tinyint   | YES         |            | 0                 |                                               |
+| logs_scraping        | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| logs_scraping        | source             | varchar   | YES         |            | NULL              |                                               |
+| logs_scraping        | nombre_collectes   | int       | YES         |            | NULL              |                                               |
+| logs_scraping        | nombre_valides     | int       | YES         |            | NULL              |                                               |
+| logs_scraping        | date_execution     | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| logs_scraping        | statut             | enum      | YES         |            | succès            |                                               |
+| logs_sociaux         | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| logs_sociaux         | post_id            | bigint    | YES         | MUL        | NULL              |                                               |
+| logs_sociaux         | plateforme         | varchar   | YES         |            | NULL              |                                               |
+| logs_sociaux         | action             | varchar   | YES         |            | NULL              |                                               |
+| logs_sociaux         | resultat           | text      | YES         |            | NULL              |                                               |
+| logs_sociaux         | date_action        | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| posts_sociaux        | id                 | bigint    | NO          | PRI        | NULL              | auto_increment                                |
+| posts_sociaux        | plateforme         | enum      | NO          |            | NULL              |                                               |
+| posts_sociaux        | contenu            | text      | NO          |            | NULL              |                                               |
+| posts_sociaux        | image_url          | varchar   | YES         |            | NULL              |                                               |
+| posts_sociaux        | hashtags           | text      | YES         |            | NULL              |                                               |
+| posts_sociaux        | statut             | enum      | YES         |            | brouillon         |                                               |
+| posts_sociaux        | date_publication   | datetime  | YES         |            | NULL              |                                               |
+| posts_sociaux        | date_creation      | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| posts_sociaux        | likes              | int       | YES         |            | 0                 |                                               |
+| posts_sociaux        | commentaires       | int       | YES         |            | 0                 |                                               |
+| posts_sociaux        | partages           | int       | YES         |            | 0                 |                                               |
+| posts_sociaux        | portee             | int       | YES         |            | 0                 |                                               |
+| posts_sociaux        | theme              | varchar   | YES         |            | NULL              |                                               |
+| posts_sociaux        | langue             | varchar   | YES         |            | français          |                                               |
+| posts_sociaux        | date_planifiee     | datetime  | YES         |            | NULL              |                                               |
+| prospects            | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| prospects            | nom                | varchar   | YES         | MUL        | NULL              |                                               |
+| prospects            | email              | varchar   | YES         | UNI        | NULL              |                                               |
+| prospects            | telephone          | varchar   | YES         |            | NULL              |                                               |
+| prospects            | secteur            | varchar   | YES         |            | NULL              |                                               |
+| prospects            | ville              | varchar   | YES         |            | NULL              |                                               |
+| prospects            | source             | varchar   | YES         |            | NULL              |                                               |
+| prospects            | score              | int       | YES         |            | 0                 |                                               |
+| prospects            | statut             | enum      | YES         |            | nouveau           |                                               |
+| prospects            | email_valide       | tinyint   | YES         |            | 0                 |                                               |
+| prospects            | date_collecte      | datetime  | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| prospects            | description        | longtext  | YES         |            | NULL              |                                               |
+| role_permissions     | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| role_permissions     | role               | varchar   | NO          | MUL        | NULL              |                                               |
+| role_permissions     | permission         | varchar   | NO          |            | NULL              |                                               |
+| role_permissions     | description        | text      | YES         |            | NULL              |                                               |
+| rotation_themes      | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| rotation_themes      | plateforme         | varchar   | NO          | UNI        | NULL              |                                               |
+| rotation_themes      | theme_index        | int       | YES         |            | 0                 |                                               |
+| rotation_themes      | themes_list        | json      | NO          |            | NULL              |                                               |
+| rotation_themes      | updated_at         | timestamp | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED on update CURRENT_TIMESTAMP |
+| scraping_history     | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| scraping_history     | user_id            | int       | YES         | MUL        | NULL              |                                               |
+| scraping_history     | sector             | varchar   | YES         |            | NULL              |                                               |
+| scraping_history     | city               | varchar   | YES         |            | NULL              |                                               |
+| scraping_history     | prospects_found    | int       | YES         |            | 0                 |                                               |
+| scraping_history     | logs               | longtext  | YES         |            | NULL              |                                               |
+| scraping_history     | status             | varchar   | YES         |            | NULL              |                                               |
+| scraping_history     | date_execution     | datetime  | YES         | MUL        | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| sequences_email      | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| sequences_email      | campagne_id        | int       | YES         | MUL        | NULL              |                                               |
+| sequences_email      | prospect_id        | int       | YES         | MUL        | NULL              |                                               |
+| sequences_email      | etape              | int       | YES         |            | 1                 |                                               |
+| sequences_email      | prochaine_relance  | datetime  | YES         |            | NULL              |                                               |
+| sequences_email      | statut             | enum      | YES         |            | actif             |                                               |
+| users                | id                 | int       | NO          | PRI        | NULL              | auto_increment                                |
+| users                | username           | varchar   | NO          | UNI        | NULL              |                                               |
+| users                | email              | varchar   | NO          | UNI        | NULL              |                                               |
+| users                | password           | varchar   | NO          |            | NULL              |                                               |
+| users                | role               | enum      | YES         | MUL        | manager           |                                               |
+| users                | status             | enum      | YES         |            | active            |                                               |
+| users                | last_login         | timestamp | YES         |            | NULL              |                                               |
+| users                | created_at         | timestamp | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED                             |
+| users                | updated_at         | timestamp | YES         |            | CURRENT_TIMESTAMP | DEFAULT_GENERATED on update CURRENT_TIMESTAMP |
++----------------------+--------------------+-----------+-------------+------------+-------------------+-----------------------------------------------+
